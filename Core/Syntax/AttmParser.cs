@@ -24,6 +24,7 @@ internal sealed class Parser
 
     private double? _bpm;
     private char? _keyRoot;
+    private bool _keySharp;
     private int _beatsPerMeasure = 4;
     private int _beatUnit = 4;
     private bool _timeSignatureKnown;
@@ -129,6 +130,7 @@ internal sealed class Parser
             {
                 Bpm = bpm,
                 KeyRoot = key,
+                KeySharp = _keySharp,
                 BeatsPerMeasure = _beatsPerMeasure,
                 BeatUnit = _beatUnit,
                 VelocityBase = Math.Clamp(_velocityBase, 1, 127),
@@ -279,40 +281,61 @@ internal sealed class Parser
         _sawKey = true;
 
         var index = equalsIndex + 1;
+
+        // 允许前置升号：1 = #C 4/4
+        var keySharp = false;
+        if (index < tokens.Count && tokens[index].Kind == TokenKind.Sharp)
+        {
+            keySharp = true;
+            index++;
+        }
+
         if (index >= tokens.Count || tokens[index].Kind != TokenKind.Identifier)
         {
-            AddDiagnostic(DiagnosticCode.DirectiveSyntax, tokens[0], SpanOf(tokens),
-                "调式声明格式错误，例如 \"1 = C 4/4\"");
+            var at = tokens[Math.Min(index, tokens.Count - 1)];
+            AddDiagnostic(DiagnosticCode.InvalidKeyRoot, at, at.Span,
+                "调式必须是 C、D、E、F、G、A、B（可加 #，例如 1 = #C 4/4）");
             return;
         }
 
         var keyToken = tokens[index];
         var keyText = keyToken.Text;
-        if (keyText.Length != 1 || !PitchMapper.TryGetRootOffset(keyText[0], out _))
+        if (keyText.Length != 1
+            || !PitchMapper.TryGetRootOffset(keyText[0], out _)
+            || char.ToUpperInvariant(keyText[0]) > 'G')
         {
             AddDiagnostic(DiagnosticCode.InvalidKeyRoot, keyToken, keyToken.Span,
-                "调式必须是 C、D、E、F、G、A、B 中的一个");
+                "调式必须是 C、D、E、F、G、A、B（可加 #，例如 1 = #C 4/4）");
             return;
         }
 
-        if (index + 3 >= tokens.Count
-            || tokens[index + 1].Kind != TokenKind.Number
-            || tokens[index + 2].Kind != TokenKind.Slash
-            || tokens[index + 3].Kind != TokenKind.Number)
+        index++;
+
+        // 也接受后置写法：1 = C# 4/4
+        if (index < tokens.Count && tokens[index].Kind == TokenKind.Sharp)
+        {
+            keySharp = true;
+            index++;
+        }
+
+        if (index + 2 >= tokens.Count
+            || tokens[index].Kind != TokenKind.Number
+            || tokens[index + 1].Kind != TokenKind.Slash
+            || tokens[index + 2].Kind != TokenKind.Number)
         {
             AddDiagnostic(DiagnosticCode.DirectiveSyntax, keyToken, SpanOf(tokens),
                 "拍号格式错误，仅支持 4/4 或 3/4");
             return;
         }
 
-        var beatsToken = tokens[index + 1];
-        var unitToken = tokens[index + 3];
+        var beatsToken = tokens[index];
+        var unitToken = tokens[index + 2];
         var beats = beatsToken.Text[0] - '0';
         var unit = unitToken.Text[0] - '0';
 
-        if (index + 4 != tokens.Count)
+        if (index + 3 != tokens.Count)
         {
-            var extra = tokens[index + 4];
+            var extra = tokens[index + 3];
             AddDiagnostic(DiagnosticCode.DirectiveSyntax, extra, extra.Span,
                 "拍号后面不能有多余内容");
             return;
@@ -326,6 +349,7 @@ internal sealed class Parser
         }
 
         _keyRoot = char.ToUpperInvariant(keyText[0]);
+        _keySharp = keySharp;
         _beatsPerMeasure = beats;
         _beatUnit = unit;
         _timeSignatureKnown = true;
@@ -670,7 +694,7 @@ internal sealed class Parser
         }
 
         var key = _keyRoot ?? 'C';
-        if (!PitchMapper.TryMap(key, digit, octave, sharp, out var pitch))
+        if (!PitchMapper.TryMap(key, _keySharp, digit, octave, sharp, out var pitch))
         {
             AddDiagnostic(DiagnosticCode.PitchOutOfRange, digitToken,
                 SourceSpan.FromBounds(tokens[start].Span.Start, digitToken.Span.End),

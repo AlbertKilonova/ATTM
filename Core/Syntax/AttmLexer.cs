@@ -51,10 +51,12 @@ public static class AttmLexer
                 continue;
             }
 
-            // '#' 后面紧跟数字是升号，否则是注释
+            // '#' 后面紧跟数字是升号；紧跟 A-G 字母时，只有在调式声明里（1 = #C）才算升号，
+            // 其余情况一律当注释，保证 "# 注释" 和 "#注释" 都能用
             if (ch == '#')
             {
-                if (index + 1 < text.Length && char.IsAsciiDigit(text[index + 1]))
+                if ((index + 1 < text.Length && char.IsAsciiDigit(text[index + 1]))
+                    || IsKeySharpMarker(tokens, text, index))
                 {
                     index++;
                     column++;
@@ -131,5 +133,50 @@ public static class AttmLexer
         }
 
         return tokens;
+    }
+
+    /// <summary>
+    /// 判断这个 '#' 是不是调式声明里的升号：
+    ///   前置 1 = #C 4/4   -> '#' 前是等号，后面紧跟 A-G
+    ///   后置 1 = C# 4/4   -> '#' 前是单个 A-G 字母，字母前是等号
+    /// 其它情况（"# 注释"、"1,2 # 说明"）都按注释处理。
+    /// </summary>
+    private static bool IsKeySharpMarker(List<Token> tokens, string text, int index)
+    {
+        var previous = LastMeaningful(tokens);
+        if (previous < 0) return false;
+
+        if (tokens[previous].Kind == TokenKind.Equals)
+        {
+            return index + 1 < text.Length
+                   && char.IsAsciiLetter(text[index + 1])
+                   && char.ToUpperInvariant(text[index + 1]) <= 'G';
+        }
+
+        if (tokens[previous].Kind != TokenKind.Identifier) return false;
+
+        var name = tokens[previous].Text;
+        if (name.Length != 1) return false;
+
+        var upper = char.ToUpperInvariant(name[0]);
+        if (upper is < 'A' or > 'G') return false;
+
+        var beforeName = LastMeaningful(tokens, previous - 1);
+        return beforeName >= 0 && tokens[beforeName].Kind == TokenKind.Equals;
+    }
+
+    private static int LastMeaningful(List<Token> tokens, int from = -1)
+    {
+        if (from < 0) from = tokens.Count - 1;
+
+        for (var i = from; i >= 0; i--)
+        {
+            var kind = tokens[i].Kind;
+            if (kind == TokenKind.Whitespace) continue;
+            if (kind == TokenKind.NewLine) return -1;
+            return i;
+        }
+
+        return -1;
     }
 }

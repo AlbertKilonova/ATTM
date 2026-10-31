@@ -595,6 +595,50 @@ internal static class Program
             return ok;
         });
 
+        Check("调式：升号调式 #C / C# 都支持", () =>
+        {
+            const char lf = (char)10;
+
+            var prefix = AttmParser.Parse("bpm = 120" + lf + "1 = #C 4/4" + lf + lf + "1,4,5,7");
+            var suffix = AttmParser.Parse("bpm = 120" + lf + "1 = C# 4/4" + lf + lf + "1,4,5,7");
+
+            if (!prefix.CanPlay || !suffix.CanPlay) return false;
+
+            var a = prefix.Score!.Notes.Select(n => n.Pitch).ToArray();
+            var b = suffix.Score!.Notes.Select(n => n.Pitch).ToArray();
+
+            Console.WriteLine($"      #C: {string.Join(",", a)}  C#: {string.Join(",", b)}  {prefix.Score.KeyName}");
+            return a.SequenceEqual(new[] { 61, 66, 68, 72 })
+                   && b.SequenceEqual(a)
+                   && prefix.Score.KeyName == "C# 大调";
+        });
+
+        Check("调式：升号调式再加 # 是双重升号", () =>
+        {
+            const char lf = (char)10;
+
+            var result = AttmParser.Parse("bpm = 120" + lf + "1 = #F 4/4" + lf + lf + "1,#1,4,5");
+            if (!result.CanPlay) return false;
+
+            var pitches = result.Score!.Notes.Select(n => n.Pitch).ToArray();
+            Console.WriteLine($"      #F: 1,#1,4,5 -> {string.Join(",", pitches)}  {result.Score.KeyName}");
+
+            return pitches.SequenceEqual(new[] { 66, 67, 71, 73 });
+        });
+
+        Check("调式：非法根音仍然报错", () =>
+        {
+            const char lf = (char)10;
+
+            var bad = AttmParser.Parse("bpm = 120" + lf + "1 = #H 4/4" + lf + lf + "1,2,3,4");
+            var ok = AttmParser.Parse("bpm = 120" + lf + "1 = #B 4/4" + lf + lf + "1,2,3,4");
+
+            return !bad.CanPlay
+                   && bad.Diagnostics.Any(d => d.Code == DiagnosticCode.InvalidKeyRoot)
+                   && ok.CanPlay
+                   && ok.Score!.Notes[0].Pitch == 72;
+        });
+
         PlaybackChecks.Run();
 
         Console.WriteLine();

@@ -18,6 +18,9 @@ public sealed class Score
 {
     public double Bpm { get; init; } = 120;
     public char KeyRoot { get; init; } = 'C';
+
+    /// <summary>调式是否带升号（1 = #C）。</summary>
+    public bool KeySharp { get; init; }
     public int BeatsPerMeasure { get; init; } = 4;
     public int BeatUnit { get; init; } = 4;
     public int VelocityBase { get; init; } = 90;
@@ -34,7 +37,7 @@ public sealed class Score
 
     public TimeSpan Duration => TimeSpan.FromSeconds(TotalTicks * SecondsPerTick);
 
-    public string KeyName => $"{KeyRoot} 大调";
+    public string KeyName => $"{PitchMapper.DescribeKey(KeyRoot, KeySharp)} 大调";
 
     public string TimeSignatureName => $"{BeatsPerMeasure}/{BeatUnit}";
 

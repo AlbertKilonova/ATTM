@@ -19,6 +19,8 @@ Vel = 90 +-0
 
 ---
 
+![ATTM 主界面](docs/screenshot.png)
+
 ## 下载
 
 - **安装包（推荐）**：[Releases](https://github.com/Anming1379/ATTM/releases) 里的 `ATTM-0.1.0-setup.exe`
@@ -46,6 +48,7 @@ ATTM 是一个 Windows 桌面小工具（.NET 10 + WPF）：
 # 注释以 # 开头
 bpm = 120        # 速度，可以带小数
 1 = C 4/4        # 调式根音 + 拍号（4/4、3/4）
+1 = #F 4/4       # 根音可以带升号，写 #F 或 F# 都行
 Vel = 90         # 力度基准 1-127
 Vel = 90 +-10    # 力度基准 + 每音随机抖动 ±10
 ```
