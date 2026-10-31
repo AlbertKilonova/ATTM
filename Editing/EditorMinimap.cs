@@ -6,7 +6,8 @@ using ATTM.Core.Syntax;
 namespace ATTM.Editing;
 
 /// <summary>
-/// 右侧缩略图：把整篇谱面按"桶"压缩成柔和的横条，再叠一个当前视野的圆角框。
+/// 右侧缩略图：把整篇谱面按统一比例压成横条，再叠一个当前视野的方框。
+/// 条、视野框、光标标记全部用同一套"文档行 -> 像素"的映射，保证上下对齐。
 /// 点一下或拖动可以快速跳转。
 /// </summary>
 public sealed class EditorMinimap : FrameworkElement
@@ -14,8 +15,17 @@ public sealed class EditorMinimap : FrameworkElement
     /// <summary>面板宽度。</summary>
     public const double PanelWidth = 80;
 
-    /// <summary>每个桶的像素高度：桶之间留空隙，行数再多也不会糊成一片。</summary>
-    private const double BucketHeight = 4.0;
+    /// <summary>顶部留白。</summary>
+    private const double TopMargin = 3;
+
+    /// <summary>短文档时每行最多占多少像素（避免把 20 行画成 600px 的大方块）。</summary>
+    private const double MaxLinePixel = 6.0;
+
+    /// <summary>文档特别长时每行的最小像素（只为避免除零，正常都会被 1 以下的值适配）。</summary>
+    private const double MinLinePixel = 0.05;
+
+    /// <summary>一个桶至少这么高，保证条与条之间有肉眼可见的空隙。</summary>
+    private const double MinBucketPixel = 4.0;
 
     private const double BarInset = 9;
     private const double MinBarWidth = 6;
@@ -25,10 +35,12 @@ public sealed class EditorMinimap : FrameworkElement
     private HashSet<int> _errorLines = new();
 
     private double _lineHeight = 25;
-    private double _topPadding = 8;
     private double _verticalOffset;
     private double _viewportHeight;
     private int _caretLine = -1;
+
+    /// <summary>文档行 -> 缩略图像素的统一比例。</summary>
+    private double _linePixel = MaxLinePixel;
 
     /// <summary>内容层缓存：只有文档、尺寸、配色变化时才重建。</summary>
     private readonly DrawingGroup _content = new();
@@ -61,6 +73,18 @@ public sealed class EditorMinimap : FrameworkElement
     /// <summary>请求把编辑器滚到某个纵向偏移。</summary>
     public Action<double>? ScrollRequested { get; set; }
 
+    /// <summary>一行文档对应多少像素（供对齐测试与调试使用）。</summary>
+    public double LinePixel => _linePixel;
+
+    /// <summary>把文档行号换算成缩略图里的纵坐标（同一个映射，供测试使用）。</summary>
+    public double YForLine(double lineIndex) => TopMargin + lineIndex * _linePixel;
+
+    /// <summary>当前视野方框的顶边（像素）。</summary>
+    public double ViewportTop => TopMargin + (_verticalOffset / Math.Max(1, _lineHeight)) * _linePixel;
+
+    /// <summary>当前视野方框的高度（像素）。</summary>
+    public double ViewportHeightPx => (_viewportHeight / Math.Max(1, _lineHeight)) * _linePixel;
+
     public void Update(
         TextBuffer? buffer,
         EditorPalette palette,
@@ -91,17 +115,14 @@ public sealed class EditorMinimap : FrameworkElement
 
         if (!ReferenceEquals(_buffer, buffer)
             || version != _bufferVersion
-            || Math.Abs(_lineHeight - lineHeight) > 0.01
-            || Math.Abs(_topPadding - topPadding) > 0.01)
+            || Math.Abs(_lineHeight - lineHeight) > 0.01)
         {
             _contentDirty = true;
         }
 
         _bufferVersion = version;
-
         _buffer = buffer;
         _lineHeight = Math.Max(1, lineHeight);
-        _topPadding = topPadding;
         _verticalOffset = Math.Max(0, verticalOffset);
         _viewportHeight = Math.Max(0, viewportHeight);
         _caretLine = caretLine;
@@ -126,6 +147,8 @@ public sealed class EditorMinimap : FrameworkElement
 
         if (_buffer is null || _buffer.LineCount == 0) return;
 
+        UpdateScale(height);
+
         if (_contentDirty
             || Math.Abs(_builtWidth - width) > 0.5
             || Math.Abs(_builtHeight - height) > 0.5)
@@ -143,27 +166,30 @@ public sealed class EditorMinimap : FrameworkElement
             dc.DrawRectangle(_hoverFill, null, new Rect(0, _hoverY - 1, width, 2));
 
         // 当前视野
-        var scale = ScaleFor(height);
-        if (_viewportHeight > 0 && scale > 0)
-        {
-            var viewY = _verticalOffset * scale;
-            var viewH = Math.Max(12, _viewportHeight * scale);
-            viewH = Math.Min(viewH, Math.Max(0, height - viewY));
+        var viewY = ViewportTop;
+        var viewH = Math.Max(8, ViewportHeightPx);
+        viewH = Math.Min(viewH, Math.Max(0, height - viewY - 1));
 
-            if (viewH > 0)
-            {
-                var rect = new Rect(1.5, viewY, width - 3, viewH);
-                dc.DrawRectangle(_viewportFill, _viewportPen, rect);
-            }
-        }
+        if (viewH > 0)
+            dc.DrawRectangle(_viewportFill, _viewportPen, new Rect(1.5, viewY, width - 3, viewH));
 
         // 光标行：右侧一小段主题色
-        if (_caretLine >= 0 && _caretLine < _buffer.LineCount && scale > 0)
+        if (_caretLine >= 0 && _caretLine < _buffer.LineCount)
         {
-            var y = _topPadding * scale + _caretLine * _lineHeight * scale;
-            var pillHeight = Math.Max(3, _lineHeight * scale * 0.72);
-            dc.DrawRectangle(_caretBrush, null, new Rect(width - 3, y + 0.5, 2, pillHeight));
+            var y = YForLine(_caretLine);
+            dc.DrawRectangle(_caretBrush, null,
+                new Rect(width - 3, y, 2, Math.Max(2, _linePixel * 0.9)));
         }
+    }
+
+    /// <summary>统一比例：文档整体在面板里的缩放系数，条和视野框都用它。</summary>
+    private void UpdateScale(double height)
+    {
+        var lines = Math.Max(1, _buffer?.LineCount ?? 1);
+        var available = Math.Max(8, height - TopMargin * 2);
+        var fit = available / lines;
+
+        _linePixel = Math.Clamp(fit, MinLinePixel, MaxLinePixel);
     }
 
     /// <summary>把整篇文档压成若干个桶，每个桶画一条柔和的横条，空白行留空。</summary>
@@ -175,16 +201,16 @@ public sealed class EditorMinimap : FrameworkElement
         var buffer = _buffer;
         if (buffer is null || buffer.LineCount == 0) return;
 
-        var bucketCount = Math.Max(1, (int)Math.Floor(height / BucketHeight));
-        var linesPerBucket = Math.Max(1, (int)Math.Ceiling(buffer.LineCount / (double)bucketCount));
+        // 行太密时一个桶覆盖多行，保证条与条之间仍有空隙
+        var linesPerBucket = Math.Max(1, (int)Math.Ceiling(MinBucketPixel / _linePixel));
+        var bucketPixel = linesPerBucket * _linePixel;
+        var barHeight = Math.Max(1.2, bucketPixel * 0.58);
+
         var usableWidth = Math.Max(MinBarWidth, width - BarInset - 9);
         var maxLength = Math.Max(8, buffer.MaxLineLength);
 
-        for (var bucket = 0; bucket < bucketCount; bucket++)
+        for (var start = 0; start < buffer.LineCount; start += linesPerBucket)
         {
-            var start = bucket * linesPerBucket;
-            if (start >= buffer.LineCount) break;
-
             var end = Math.Min(buffer.LineCount, start + linesPerBucket);
 
             var nonEmpty = 0;
@@ -216,19 +242,11 @@ public sealed class EditorMinimap : FrameworkElement
             var averageLength = totalLength / (double)nonEmpty;
             var barWidth = Math.Clamp(usableWidth * (averageLength / maxLength), MinBarWidth, usableWidth);
 
-            var y = bucket * BucketHeight;
-            var barHeight = Math.Max(1.4, BucketHeight - 2.2);
+            // 关键：y 用统一映射算，和视野框、光标标记完全对齐
+            var y = YForLine(start);
 
             dc.DrawRectangle(brush, null, new Rect(BarInset, y, barWidth, barHeight));
         }
-    }
-
-    private double ScaleFor(double height)
-    {
-        if (_buffer is null || _buffer.LineCount == 0) return 0;
-
-        var contentHeight = _topPadding * 2 + _buffer.LineCount * _lineHeight;
-        return contentHeight <= 0 ? 0 : height / contentHeight;
     }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -278,13 +296,11 @@ public sealed class EditorMinimap : FrameworkElement
 
     private void ScrollToPoint(Point point)
     {
-        if (_buffer is null || ActualHeight <= 0 || _buffer.LineCount == 0) return;
+        if (_buffer is null || _buffer.LineCount == 0) return;
 
-        var scale = ScaleFor(ActualHeight);
-        if (scale <= 0) return;
-
-        var contentY = point.Y / scale - _topPadding;
-        var target = contentY - _viewportHeight / 2;
+        var visibleLines = _viewportHeight / Math.Max(1, _lineHeight);
+        var targetLine = (point.Y - TopMargin) / Math.Max(0.01, _linePixel) - visibleLines / 2;
+        var target = targetLine * _lineHeight;
 
         ScrollRequested?.Invoke(Math.Max(0, target));
     }

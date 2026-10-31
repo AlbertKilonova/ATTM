@@ -107,6 +107,15 @@ public sealed class AttmEditor : Grid
 
     public double EditorLineHeight => _view.LineHeight;
 
+    /// <summary>当前纵向滚动偏移。</summary>
+    public double VerticalOffset => _scroll.VerticalOffset;
+
+    /// <summary>当前可视区域高度。</summary>
+    public double ViewportHeight => _scroll.ViewportHeight;
+
+    /// <summary>滚动到指定纵向偏移。</summary>
+    public void ScrollToVerticalOffset(double offset) => _scroll.ScrollToVerticalOffset(Math.Max(0, offset));
+
     /// <summary>播放跟随时把某一行的位置滚进视野。</summary>
     public void ScrollOffsetIntoView(int offset) => _view.ScrollOffsetIntoView(offset);
 

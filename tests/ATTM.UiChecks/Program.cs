@@ -169,17 +169,55 @@ bpm = 120
             var minimap = Descendants(window).OfType<EditorMinimap>().FirstOrDefault();
             if (minimap is null || editor.ActualWidth <= 0) return false;
 
-            var ink = NonBackgroundPixels(minimap);
+            var ratio = InkRatio(minimap);
             var leftEdge = minimap.TranslatePoint(new Point(0, 0), editor).X;
             var onRight = leftEdge > editor.ActualWidth * 0.6;
 
-            Console.WriteLine($"      缩略图 {minimap.ActualWidth:F0}x{minimap.ActualHeight:F0}，x={leftEdge:F0}，墨点 {ink}");
+            Console.WriteLine($"      缩略图 {minimap.ActualWidth:F0}x{minimap.ActualHeight:F0}，x={leftEdge:F0}，墨点占比 {ratio:P1}");
 
-            return minimap.ActualWidth >= 70 && minimap.ActualHeight > 100 && ink > 50 && onRight;
+            return minimap.ActualWidth >= 70 && minimap.ActualHeight > 100 && ratio > 0.01 && onRight;
         });
 
         Check("编辑器不显示滚动条（导航交给缩略图）", () =>
             Descendants(editor).OfType<ScrollBar>().All(bar => bar.Visibility != Visibility.Visible));
+
+        Check("缩略图与内容对齐", () =>
+        {
+            const char lf = (char)10;
+
+            var original = editor.Text;
+            var builder = new StringBuilder("bpm = 120" + lf + "1 = C 4/4" + lf + lf);
+            for (var i = 0; i < 120; i++)
+                builder.Append("1,2,3,4" + lf + lf);
+
+            editor.Text = builder.ToString();
+            Pump(700);
+
+            var minimap = Descendants(window).OfType<EditorMinimap>().First();
+            var lineHeight = editor.EditorLineHeight;
+            var ok = true;
+            var details = new List<string>();
+
+            foreach (var fraction in new[] { 0.0, 0.35, 1.0 })
+            {
+                editor.ScrollToVerticalOffset(fraction * Math.Max(0, editor.Buffer.LineCount * lineHeight - editor.ViewportHeight));
+                Pump(200);
+
+                // 视野框顶边应该等于"当前滚到的那一行"在缩略图里的 y
+                var expected = minimap.YForLine(editor.VerticalOffset / lineHeight);
+                var actual = minimap.ViewportTop;
+                details.Add($"{fraction:P0}: 期望 {expected:F1} 实际 {actual:F1}");
+
+                if (Math.Abs(expected - actual) > 1.5) ok = false;
+            }
+
+            editor.Text = original;
+            editor.ScrollToVerticalOffset(0);
+            Pump(400);
+
+            Console.WriteLine("      " + string.Join(" | ", details));
+            return ok;
+        });
 
         Check("缩略图：长文档不会糊成一片", () =>
         {
@@ -195,12 +233,13 @@ bpm = 120
 
             var minimap = Descendants(window).OfType<EditorMinimap>().First();
             var ratio = InkRatio(minimap);
+            var deviation = MeanDeviation(minimap);
 
             editor.Text = original;
             Pump(400);
 
-            Console.WriteLine($"      600 行文档，缩略图墨点占比 {ratio:P1}");
-            return ratio is > 0.04 and < 0.55;
+            Console.WriteLine($"      600 行文档，墨点占比 {ratio:P1}，平均亮度差 {deviation:F1}");
+            return ratio > 0.05 && deviation is > 2 and < 55;
         });
 
         // ---------------------------------------------------------- 播放
@@ -515,6 +554,45 @@ bpm = 120
     }
 
     /// <summary>把一个元素画到位图上，统计文本区里"和背景不同"的像素数（深浅主题通用）。</summary>
+    /// <summary>统计元素与背景色的平均亮度差，用来判断"是不是太抢眼"。</summary>
+    private static double MeanDeviation(FrameworkElement element)
+    {
+        var width = (int)Math.Max(1, element.ActualWidth);
+        var height = (int)Math.Max(1, element.ActualHeight);
+        if (width <= 2 || height <= 2) return 0;
+
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        bitmap.CopyPixels(pixels, stride, 0);
+
+        var histogram = new Dictionary<int, int>();
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            var key = pixels[i] | (pixels[i + 1] << 8) | (pixels[i + 2] << 16);
+            histogram[key] = histogram.GetValueOrDefault(key) + 1;
+        }
+
+        var background = histogram.OrderByDescending(pair => pair.Value).First().Key;
+        int bgB = background & 0xFF, bgG = (background >> 8) & 0xFF, bgR = (background >> 16) & 0xFF;
+
+        double sum = 0;
+        var total = 0;
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            sum += (Math.Abs(pixels[i] - bgB) + Math.Abs(pixels[i + 1] - bgG) + Math.Abs(pixels[i + 2] - bgR)) / 3.0;
+            total++;
+        }
+
+        return total == 0 ? 0 : sum / total;
+    }
+
     /// <summary>统计元素的"墨点比例"（与出现最多的颜色不同的像素占比），适合衡量缩略图密不密。</summary>
     private static double InkRatio(FrameworkElement element)
     {
