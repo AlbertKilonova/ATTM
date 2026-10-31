@@ -50,7 +50,7 @@ Vel = 90 +-0
     private int _lastSecond = -1;
     private bool _hasHighlight;
 
-    public MainWindow()
+    public MainWindow(string? initialFile = null)
     {
         _config = AppConfig.Load();
 
@@ -99,7 +99,12 @@ Vel = 90 +-0
             Editor.EditorFontSize = _config.EditorFontSize;
             _deviceName = _config.MidiOutputDevice;
             ApplyMidiDevice(_config.MidiOutputDevice);
-            Editor.FocusEditor();
+
+            // 双击 .attm 打开时，命令行参数里带着文件路径
+            if (!string.IsNullOrWhiteSpace(initialFile) && File.Exists(initialFile))
+                LoadFile(initialFile);
+            else
+                Editor.FocusEditor();
         };
 
         Closing += (_, e) =>

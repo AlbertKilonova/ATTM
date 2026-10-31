@@ -38,6 +38,7 @@ ATTM 是一个 Windows 桌面小工具（.NET 10 + WPF）：
 - **纯文本编辑器**：自己画的编辑器，带简谱语法高亮、行号、错误波浪线
 - **直接发声**：把音符通过 winmm 发送到系统 MIDI 输出端口（Microsoft GS Wavetable Synth、loopMIDI、Pianoteq 等）
 - **导出 MIDI**：保存时同时产出 `.attm` 文本和同名 `.mid` 文件，可以直接拖进 DAW 或打谱软件
+- **双击关联**：安装包注册 `.attm`，资源管理器里双击即打开
 - **右侧缩略图**：整篇谱面压成小横条，点一下或拖动就能跳转，还能一眼看到错误行
 - **零第三方运行时依赖**：没有 AvalonEdit、没有 NAudio、没有 Melanchall，MIDI 写入器与播放器都是手写的
 

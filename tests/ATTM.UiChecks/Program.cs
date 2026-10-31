@@ -319,6 +319,43 @@ bpm = 120
             Descendants(window).OfType<Button>()
                 .Any(b => (b.ToolTip as string) == "从光标所在小节播放" && b.IsEnabled));
 
+        Check("命令行参数能打开 .attm（双击关联）", () =>
+        {
+            const char lf = (char)10;
+
+            var path = Path.Combine(Path.GetTempPath(), "attm-open-test.attm");
+            File.WriteAllText(path, "bpm = 90" + lf + "1 = C 3/4" + lf + lf + "1,2,3");
+
+            var other = new MainWindow(path);
+            other.Show();
+            Pump(600);
+
+            var fileLabel = (other.FindName("FileStatusText") as TextBlock)?.Text ?? string.Empty;
+            var info = (other.FindName("InfoText") as TextBlock)?.Text ?? string.Empty;
+            var title = other.Title;
+
+            other.Close();
+            File.Delete(path);
+
+            Console.WriteLine($"      标题={title} 文件名={fileLabel} 信息={info}");
+
+            return title.Contains("attm-open-test.attm", StringComparison.Ordinal)
+                   && fileLabel == "attm-open-test.attm"
+                   && info.Contains("3/4");
+        });
+
+        Check("不存在的命令行参数回退到新建模板", () =>
+        {
+            var other = new MainWindow(Path.Combine(Path.GetTempPath(), "definitely-missing.attm"));
+            other.Show();
+            Pump(500);
+
+            var fileLabel = (other.FindName("FileStatusText") as TextBlock)?.Text ?? string.Empty;
+
+            other.Close();
+            return fileLabel == "未命名.attm";
+        });
+
         Check("保存对话框预览双文件路径", () =>
         {
             var dialog = new SaveAsWindow(null, AppConfig.Load(), false) { Owner = window };
