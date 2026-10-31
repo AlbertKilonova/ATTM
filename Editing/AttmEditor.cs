@@ -20,7 +20,7 @@ public sealed class AttmEditor : Grid
     {
         ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorMinimap.PanelWidth) });
 
         _scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         _scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;

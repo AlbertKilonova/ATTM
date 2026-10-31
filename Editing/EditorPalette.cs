@@ -18,6 +18,7 @@ public sealed class EditorPalette
     public required Brush Border { get; init; }
     public required Brush Error { get; init; }
     public required Brush ErrorSoft { get; init; }
+    public required Brush Accent { get; init; }
 
     public required Brush Comment { get; init; }
     public required Brush Directive { get; init; }
@@ -55,6 +56,7 @@ public sealed class EditorPalette
         Border = Get(anchor, "Brush.Border", "#FF2E2E36"),
         Error = Get(anchor, "Brush.Error", "#FFFF6B6B"),
         ErrorSoft = Get(anchor, "Brush.ErrorSoft", "#33FF6B6B"),
+        Accent = Get(anchor, "Brush.Accent", "#FFFF4E6A"),
         Comment = Get(anchor, "Brush.Syntax.Comment", "#FF6A6A78"),
         Directive = Get(anchor, "Brush.Syntax.Directive", "#FF7FB4FF"),
         Value = Get(anchor, "Brush.Syntax.Value", "#FFFFB86C"),

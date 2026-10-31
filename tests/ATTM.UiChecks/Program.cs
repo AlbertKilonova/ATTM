@@ -180,6 +180,28 @@ bpm = 120
 
         Check("编辑器内有滚动条", () => Descendants(editor).OfType<ScrollBar>().Any());
 
+        Check("缩略图：长文档不会糊成一片", () =>
+        {
+            const char lf = (char)10;
+
+            var original = editor.Text;
+            var builder = new StringBuilder("bpm = 120" + lf + "1 = C 4/4" + lf + lf);
+            for (var i = 0; i < 300; i++)
+                builder.Append("1,2,3,4,5,6,7,+1" + lf + lf);
+
+            editor.Text = builder.ToString();
+            Pump(700);
+
+            var minimap = Descendants(window).OfType<EditorMinimap>().First();
+            var ratio = InkRatio(minimap);
+
+            editor.Text = original;
+            Pump(400);
+
+            Console.WriteLine($"      600 行文档，缩略图墨点占比 {ratio:P1}");
+            return ratio is > 0.04 and < 0.55;
+        });
+
         // ---------------------------------------------------------- 播放
 
         Check("播放按钮已启用", () => (window.FindName("PlayPauseButton") as Button)?.IsEnabled == true);
@@ -492,6 +514,50 @@ bpm = 120
     }
 
     /// <summary>把一个元素画到位图上，统计文本区里"和背景不同"的像素数（深浅主题通用）。</summary>
+    /// <summary>统计元素的"墨点比例"（与出现最多的颜色不同的像素占比），适合衡量缩略图密不密。</summary>
+    private static double InkRatio(FrameworkElement element)
+    {
+        var width = (int)Math.Max(1, element.ActualWidth);
+        var height = (int)Math.Max(1, element.ActualHeight);
+        if (width <= 2 || height <= 2) return 0;
+
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        bitmap.CopyPixels(pixels, stride, 0);
+
+        // 找出出现最多的颜色当作背景色
+        var histogram = new Dictionary<int, int>();
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            var key = pixels[i] | (pixels[i + 1] << 8) | (pixels[i + 2] << 16);
+            histogram[key] = histogram.GetValueOrDefault(key) + 1;
+        }
+
+        var background = histogram.OrderByDescending(pair => pair.Value).First().Key;
+        int bgB = background & 0xFF, bgG = (background >> 8) & 0xFF, bgR = (background >> 16) & 0xFF;
+
+        var ink = 0;
+        var total = 0;
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var i = y * stride + x * 4;
+                total++;
+                var distance = Math.Abs(pixels[i] - bgB) + Math.Abs(pixels[i + 1] - bgG) + Math.Abs(pixels[i + 2] - bgR);
+                if (distance > 24) ink++;
+            }
+        }
+
+        return total == 0 ? 0 : ink / (double)total;
+    }
     private static int NonBackgroundPixels(FrameworkElement element)
     {
         var width = (int)Math.Max(1, element.ActualWidth);
