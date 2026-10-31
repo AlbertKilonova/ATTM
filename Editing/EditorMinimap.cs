@@ -33,6 +33,9 @@ public sealed class EditorMinimap : FrameworkElement
     /// <summary>内容层缓存：只有文档、尺寸、配色变化时才重建。</summary>
     private readonly DrawingGroup _content = new();
     private bool _contentDirty = true;
+    private int _bufferVersion = -1;
+    private double _builtWidth;
+    private double _builtHeight;
 
     private Brush _noteBrush = Brushes.Gray;
     private Brush _commentBrush = Brushes.Gray;
@@ -68,6 +71,9 @@ public sealed class EditorMinimap : FrameworkElement
         int caretLine,
         HashSet<int>? errorLines)
     {
+        // TextBuffer 是原地修改的，引用不变不代表内容不变，必须看版本号
+        var version = buffer?.Version ?? -1;
+
         if (!ReferenceEquals(_palette, palette))
         {
             _palette = palette;
@@ -84,11 +90,14 @@ public sealed class EditorMinimap : FrameworkElement
         }
 
         if (!ReferenceEquals(_buffer, buffer)
+            || version != _bufferVersion
             || Math.Abs(_lineHeight - lineHeight) > 0.01
             || Math.Abs(_topPadding - topPadding) > 0.01)
         {
             _contentDirty = true;
         }
+
+        _bufferVersion = version;
 
         _buffer = buffer;
         _lineHeight = Math.Max(1, lineHeight);
@@ -117,10 +126,14 @@ public sealed class EditorMinimap : FrameworkElement
 
         if (_buffer is null || _buffer.LineCount == 0) return;
 
-        if (_contentDirty)
+        if (_contentDirty
+            || Math.Abs(_builtWidth - width) > 0.5
+            || Math.Abs(_builtHeight - height) > 0.5)
         {
             RebuildContent(width, height);
             _contentDirty = false;
+            _builtWidth = width;
+            _builtHeight = height;
         }
 
         dc.DrawDrawing(_content);
@@ -140,7 +153,7 @@ public sealed class EditorMinimap : FrameworkElement
             if (viewH > 0)
             {
                 var rect = new Rect(1.5, viewY, width - 3, viewH);
-                dc.DrawRoundedRectangle(_viewportFill, _viewportPen, rect, 3, 3);
+                dc.DrawRectangle(_viewportFill, _viewportPen, rect);
             }
         }
 
@@ -149,8 +162,7 @@ public sealed class EditorMinimap : FrameworkElement
         {
             var y = _topPadding * scale + _caretLine * _lineHeight * scale;
             var pillHeight = Math.Max(3, _lineHeight * scale * 0.72);
-            dc.DrawRoundedRectangle(_caretBrush, null,
-                new Rect(width - 3, y + 0.5, 2, pillHeight), 1, 1);
+            dc.DrawRectangle(_caretBrush, null, new Rect(width - 3, y + 0.5, 2, pillHeight));
         }
     }
 
@@ -207,8 +219,7 @@ public sealed class EditorMinimap : FrameworkElement
             var y = bucket * BucketHeight;
             var barHeight = Math.Max(1.4, BucketHeight - 2.2);
 
-            dc.DrawRoundedRectangle(brush, null,
-                new Rect(BarInset, y, barWidth, barHeight), 1, 1);
+            dc.DrawRectangle(brush, null, new Rect(BarInset, y, barWidth, barHeight));
         }
     }
 

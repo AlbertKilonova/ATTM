@@ -21,7 +21,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="7">
+                            CornerRadius="0">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center" />
                     </Border>
@@ -76,7 +76,7 @@
                     <Border Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="5"
+                            CornerRadius="0"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter />
                     </Border>
@@ -102,7 +102,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6">
+                            CornerRadius="0">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Margin="{TemplateBinding Padding}" />
@@ -136,7 +136,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="0">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Margin="{TemplateBinding Padding}" />
@@ -175,7 +175,7 @@
                                             Background="{DynamicResource Brush.SurfaceAlt}"
                                             BorderBrush="{DynamicResource Brush.Border}"
                                             BorderThickness="1"
-                                            CornerRadius="6">
+                                            CornerRadius="0">
                                         <Path HorizontalAlignment="Right" VerticalAlignment="Center"
                                               Margin="0,0,10,0"
                                               Data="M0,0 L4,4 L8,0"
@@ -203,7 +203,7 @@
                             <Border Background="{DynamicResource Brush.Surface}"
                                     BorderBrush="{DynamicResource Brush.Border}"
                                     BorderThickness="1"
-                                    CornerRadius="6"
+                                    CornerRadius="0"
                                     Margin="0,4,0,0"
                                     Padding="4"
                                     MaxHeight="260"
@@ -232,7 +232,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="0" Padding="{TemplateBinding Padding}">
                         <ContentPresenter />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -266,7 +266,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6">
+                            CornerRadius="0">
                         <ScrollViewer x:Name="PART_ContentHost"
                                       Margin="{TemplateBinding Padding}"
                                       VerticalAlignment="Center" />

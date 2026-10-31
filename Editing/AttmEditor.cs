@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using ATTM.Core.Syntax;
 
 namespace ATTM.Editing;
@@ -22,12 +23,23 @@ public sealed class AttmEditor : Grid
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorMinimap.PanelWidth) });
 
-        _scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-        _scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        // 导航交给右侧缩略图，正文区不再显示滚动条
+        _scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        _scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
         _scroll.CanContentScroll = false;
         _scroll.Focusable = false;
         _scroll.Content = _view;
         _scroll.ScrollChanged += (_, _) => SyncScroll();
+
+        // 横向移动：Shift + 滚轮（竖向仍然直接滚轮）
+        _scroll.PreviewMouseWheel += (_, e) =>
+        {
+            var modifiers = Keyboard.Modifiers;
+            if ((modifiers & ModifierKeys.Shift) == 0 || (modifiers & ModifierKeys.Control) != 0) return;
+
+            _scroll.ScrollToHorizontalOffset(Math.Max(0, _scroll.HorizontalOffset - e.Delta / 3.0));
+            e.Handled = true;
+        };
 
         Grid.SetColumn(_gutter, 0);
         Grid.SetColumn(_scroll, 1);

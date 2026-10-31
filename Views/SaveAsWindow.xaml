@@ -35,7 +35,7 @@
                     Style="{StaticResource TextButton}" Click="Browse_Click" />
         </Grid>
 
-        <Border Margin="0,18,0,0" Padding="12,10" CornerRadius="8"
+        <Border Margin="0,18,0,0" Padding="12,10" CornerRadius="0"
                 Background="{DynamicResource Brush.SurfaceAlt}">
             <StackPanel>
                 <TextBlock Text="会同时保存两个文件：" FontSize="{DynamicResource Size.UI.Small}"

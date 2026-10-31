@@ -178,7 +178,8 @@ bpm = 120
             return minimap.ActualWidth >= 70 && minimap.ActualHeight > 100 && ink > 50 && onRight;
         });
 
-        Check("编辑器内有滚动条", () => Descendants(editor).OfType<ScrollBar>().Any());
+        Check("编辑器不显示滚动条（导航交给缩略图）", () =>
+            Descendants(editor).OfType<ScrollBar>().All(bar => bar.Visibility != Visibility.Visible));
 
         Check("缩略图：长文档不会糊成一片", () =>
         {

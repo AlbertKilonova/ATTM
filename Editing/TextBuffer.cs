@@ -20,10 +20,14 @@ public sealed class TextBuffer
 
     public int MaxLineLength { get; private set; }
 
+    /// <summary>每次内容变化自增，供缩略图之类需要判断"内容真的变了"的地方使用。</summary>
+    public int Version { get; private set; }
+
     public void Reset(string text)
     {
         _text = Normalize(text);
         Rebuild();
+        Version++;
     }
 
     public static string Normalize(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
@@ -44,6 +48,7 @@ public sealed class TextBuffer
 
         _text = string.Concat(_text.AsSpan(0, offset), insertText, _text.AsSpan(offset + removeLength));
         Rebuild();
+        Version++;
     }
 
     public string GetText(int offset, int length)
