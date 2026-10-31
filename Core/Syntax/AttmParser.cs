@@ -620,21 +620,24 @@ internal sealed class Parser
         note = default;
         var start = i;
         var octave = 0;
-        var sawOctave = false;
+        var direction = 0;
 
+        // + 可以叠加：++1 高两个八度，+++#1 高三个八度的 #1；- 同理
         while (i < tokens.Count && tokens[i].Kind is TokenKind.Plus or TokenKind.Minus)
         {
-            if (sawOctave)
+            var current = tokens[i].Kind == TokenKind.Plus ? 1 : -1;
+
+            if (direction != 0 && current != direction)
             {
                 AddDiagnostic(DiagnosticCode.InvalidCharacter, tokens[i], tokens[i].Span,
-                    "八度标记重复，例如 \"++1\"");
+                    "八度标记不能混用 + 和 -，例如 \"+-1\"");
             }
             else
             {
-                octave = tokens[i].Kind == TokenKind.Plus ? 1 : -1;
+                direction = current;
+                octave += current;
             }
 
-            sawOctave = true;
             var markerEnd = tokens[i].Span.End;
             i++;
 
@@ -645,6 +648,8 @@ internal sealed class Parser
                 return false;
             }
         }
+
+        var sawOctave = direction != 0;
 
         var sharp = false;
         if (i < tokens.Count && tokens[i].Kind == TokenKind.Sharp)

@@ -5,19 +5,22 @@ using ATTM.Core.Syntax;
 namespace ATTM.Editing;
 
 /// <summary>
-/// 编辑器宿主：左侧行号槽 + 右侧可滚动的自绘文本区。
+/// 编辑器宿主：行号槽 + 可滚动的自绘文本区 + 最右缩略图。
 /// 对外暴露文本、光标、撤销、解析结果等接口。
 /// </summary>
 public sealed class AttmEditor : Grid
 {
+    private readonly EditorMinimap _minimap = new();
     private readonly EditorTextView _view = new();
     private readonly EditorGutter _gutter = new();
     private readonly ScrollViewer _scroll = new();
+    private EditorPalette _palette = EditorPalette.CreateFallback();
 
     public AttmEditor()
     {
         ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
 
         _scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         _scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -28,13 +31,18 @@ public sealed class AttmEditor : Grid
 
         Grid.SetColumn(_gutter, 0);
         Grid.SetColumn(_scroll, 1);
+        Grid.SetColumn(_minimap, 2);
 
+        _minimap.ScrollRequested = offset => _scroll.ScrollToVerticalOffset(Math.Max(0, offset));
+
+        Children.Add(_minimap);
         Children.Add(_gutter);
         Children.Add(_scroll);
 
         _view.BufferChanged += (_, _) =>
         {
             UpdateGutter();
+            SyncMinimap();
             BufferChanged?.Invoke(this, EventArgs.Empty);
         };
 
@@ -46,7 +54,11 @@ public sealed class AttmEditor : Grid
 
         _view.HistoryChanged += (_, _) => HistoryChanged?.Invoke(this, EventArgs.Empty);
 
-        _view.LineMetricsChanged += (_, _) => SyncMetrics();
+        _view.LineMetricsChanged += (_, _) =>
+        {
+            SyncMetrics();
+            SyncMinimap();
+        };
 
         Loaded += (_, _) =>
         {
@@ -108,6 +120,7 @@ public sealed class AttmEditor : Grid
                 .ToHashSet();
 
         _gutter.InvalidateVisual();
+        SyncMinimap();
     }
 
     public void SetPlaybackSpans(IReadOnlyList<SourceSpan>? spans) => _view.SetPlaybackSpans(spans);
@@ -127,10 +140,12 @@ public sealed class AttmEditor : Grid
     public void ApplyTheme()
     {
         var palette = EditorPalette.FromResources(this);
+        _palette = palette;
         Background = palette.Background;
         _view.SetPalette(palette);
         _gutter.Palette = palette;
         _gutter.InvalidateVisual();
+        SyncMinimap();
     }
 
     private void SyncMetrics()
@@ -148,6 +163,7 @@ public sealed class AttmEditor : Grid
         _gutter.VerticalOffset = _scroll.VerticalOffset;
         _gutter.InvalidateVisual();
         _view.InvalidateVisual();
+        SyncMinimap();
 
         // 让文本区至少填满视口，点击空白处也能定位到最后一行
         var viewportHeight = _scroll.ViewportHeight;
@@ -160,5 +176,19 @@ public sealed class AttmEditor : Grid
         _gutter.ActiveLine = _view.CaretLine;
         _gutter.LineCount = _view.Buffer.LineCount;
         _gutter.InvalidateVisual();
+        SyncMinimap();
+    }
+
+    private void SyncMinimap()
+    {
+        _minimap.Update(
+            _view.Buffer,
+            _palette,
+            _view.LineHeight,
+            _view.TopPadding,
+            _scroll.VerticalOffset,
+            _scroll.ViewportHeight,
+            _view.CaretLine,
+            _gutter.ErrorLines);
     }
 }

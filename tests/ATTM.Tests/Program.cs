@@ -283,8 +283,11 @@ internal static class Program
             return !r.HasErrors && r.Score is { Notes.Count: 4 };
         });
 
-        Check("错误：重复八度标记 `++1` 报 E102", () =>
-            HasCode(Parse(Header, "++1"), DiagnosticCode.InvalidCharacter));
+        Check("八度：`++1` 合法（= 高两个八度）", () =>
+            !Parse(Header, "++1").HasErrors);
+
+        Check("错误：混用八度标记 `+-1` 报 E102", () =>
+            HasCode(Parse(Header, "+-1"), DiagnosticCode.InvalidCharacter));
 
         // ---------------------------------------------------------- 音高映射
 
@@ -637,6 +640,36 @@ internal static class Program
                    && bad.Diagnostics.Any(d => d.Code == DiagnosticCode.InvalidKeyRoot)
                    && ok.CanPlay
                    && ok.Score!.Notes[0].Pitch == 72;
+        });
+
+        Check("音符：+/- 可以叠加表示多个八度", () =>
+        {
+            const char lf = (char)10;
+
+            var result = AttmParser.Parse("bpm = 120" + lf + "1 = C 4/4" + lf + lf
+                + "++1,--1,+++#1,--#1");
+
+            if (!result.CanPlay)
+            {
+                Console.WriteLine("      " + result.Diagnostics.FirstOrDefault()?.Message);
+                return false;
+            }
+
+            var pitches = result.Score!.Notes.Select(n => n.Pitch).ToArray();
+            Console.WriteLine($"      ++1,--1,+++#1,--#1 -> {string.Join(",", pitches)}");
+
+            return pitches.SequenceEqual(new[] { 84, 36, 97, 37 });
+        });
+
+        Check("音符：混用 +/- 会报错", () =>
+        {
+            const char lf = (char)10;
+
+            var mixed = AttmParser.Parse("bpm = 120" + lf + "1 = C 4/4" + lf + lf + "+-1,2,3,4");
+            var rest = AttmParser.Parse("bpm = 120" + lf + "1 = C 4/4" + lf + lf + "++0,1,1,1");
+
+            return mixed.Diagnostics.Any(d => d.Message.Contains("不能混用"))
+                   && rest.Diagnostics.Any(d => d.Message.Contains("休止符 0"));
         });
 
         PlaybackChecks.Run();

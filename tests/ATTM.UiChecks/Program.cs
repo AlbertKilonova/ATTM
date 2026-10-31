@@ -164,6 +164,20 @@ bpm = 120
         Check("行号槽已绘制", () => gutter is not null && gutter.ActualWidth > 40,
             gutter is null ? "(null)" : $"{gutter.ActualWidth:F0}");
 
+        Check("缩略图已绘制在右侧", () =>
+        {
+            var minimap = Descendants(window).OfType<EditorMinimap>().FirstOrDefault();
+            if (minimap is null || editor.ActualWidth <= 0) return false;
+
+            var ink = NonBackgroundPixels(minimap);
+            var leftEdge = minimap.TranslatePoint(new Point(0, 0), editor).X;
+            var onRight = leftEdge > editor.ActualWidth * 0.6;
+
+            Console.WriteLine($"      缩略图 {minimap.ActualWidth:F0}x{minimap.ActualHeight:F0}，x={leftEdge:F0}，墨点 {ink}");
+
+            return minimap.ActualWidth >= 70 && minimap.ActualHeight > 100 && ink > 50 && onRight;
+        });
+
         Check("编辑器内有滚动条", () => Descendants(editor).OfType<ScrollBar>().Any());
 
         // ---------------------------------------------------------- 播放
