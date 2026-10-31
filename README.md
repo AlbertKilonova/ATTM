@@ -19,6 +19,16 @@ Vel = 90 +-0
 
 ---
 
+## 下载
+
+- **安装包（推荐）**：[Releases](https://github.com/Anming1379/ATTM/releases) 里的 `ATTM-0.1.0-setup.exe`
+  约 2.6 MB，安装时会自动检测并安装 .NET 10 桌面运行时
+- **绿色版**：`ATTM-0.1.0-win-x64.zip` 约 0.8 MB，需要自己装 .NET 10 桌面运行时
+
+系统要求：Windows 10 / 11 x64。
+
+---
+
 ## 它是什么
 
 ATTM 是一个 Windows 桌面小工具（.NET 10 + WPF）：
