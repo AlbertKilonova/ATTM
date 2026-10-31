@@ -1,0 +1,9 @@
+bin/
+obj/
+dist/
+*.user
+.vs/
+*_wpftmp.csproj
+
+# 本机环境笔记，不入库
+AI-环境交接.txt

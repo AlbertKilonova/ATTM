@@ -1,0 +1,21 @@
+* text=auto
+
+# 脚本保持 CRLF（Windows PowerShell 5.1 友好）
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# 文本资源统一 LF（程序和 git diff 都更省心）
+*.cs text eol=lf
+*.xaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.attm text eol=lf
+*.csproj text eol=lf
+*.manifest text eol=lf
+
+# 二进制
+*.ico binary
+*.ttf binary
+*.png binary
+*.exe binary
+*.mid binary

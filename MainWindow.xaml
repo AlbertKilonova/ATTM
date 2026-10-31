@@ -1,0 +1,111 @@
+<Window x:Class="ATTM.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:editing="clr-namespace:ATTM.Editing"
+        mc:Ignorable="d"
+        Title="ATTM"
+        Width="1100" Height="720"
+        MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Brush.Window}"
+        Foreground="{DynamicResource Brush.Text}"
+        FontFamily="{DynamicResource Font.UI}"
+        FontSize="{DynamicResource Size.UI}"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        AllowDrop="True"
+        Drop="Window_Drop"
+        DragOver="Window_DragOver">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="46" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="26" />
+        </Grid.RowDefinitions>
+
+        <!-- 工具栏 -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource Brush.Surface}"
+                BorderBrush="{DynamicResource Brush.Border}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="PlayPauseButton" Style="{StaticResource IconButton}"
+                            Content="&#xE037;" ToolTip="播放" Click="PlayPauseButton_Click" IsEnabled="False" />
+                    <Button x:Name="PlayFromCursorButton" Style="{StaticResource IconButton}"
+                            Content="&#xE1C4;" ToolTip="从光标所在小节播放" Click="PlayFromCursorButton_Click"
+                            IsEnabled="False" />
+                    <Button x:Name="StopButton" Style="{StaticResource IconButton}"
+                            Content="&#xE047;" ToolTip="停止并回到开头" Click="StopButton_Click" IsEnabled="False" />
+
+                    <Border Style="{StaticResource ToolbarSeparator}" />
+
+                    <Button x:Name="UndoButton" Style="{StaticResource IconButton}"
+                            Content="&#xE166;" ToolTip="撤销 (Ctrl+Z)" Click="UndoButton_Click" />
+                    <Button x:Name="RedoButton" Style="{StaticResource IconButton}"
+                            Content="&#xE15A;" ToolTip="重做 (Ctrl+R / Ctrl+Y)" Click="RedoButton_Click" />
+
+                    <Border Style="{StaticResource ToolbarSeparator}" />
+
+                    <Button x:Name="NewButton" Style="{StaticResource IconButton}"
+                            Content="&#xE89C;" ToolTip="新建 (Ctrl+N)" Click="NewButton_Click" />
+                    <Button x:Name="OpenButton" Style="{StaticResource IconButton}"
+                            Content="&#xE2C8;" ToolTip="打开 (Ctrl+O)" Click="OpenButton_Click" />
+                    <Button x:Name="SaveButton" Style="{StaticResource IconButton}"
+                            Content="&#xE161;" ToolTip="保存 (Ctrl+S)，另存为 (Ctrl+Shift+S)"
+                            Click="SaveButton_Click" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ThemeButton" Style="{StaticResource IconButton}"
+                            Content="&#xE518;" ToolTip="切换深色 / 浅色主题" Click="ThemeButton_Click" />
+                    <Button x:Name="SettingsButton" Style="{StaticResource IconButton}"
+                            Content="&#xE8B8;" ToolTip="设置" Click="SettingsButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 编辑区 -->
+        <editing:AttmEditor x:Name="Editor" Grid.Row="1" />
+
+        <!-- 状态栏 -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource Brush.Surface}"
+                BorderBrush="{DynamicResource Brush.Border}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="12,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="FileStatusText" Style="{StaticResource StatusText}" Text="未命名.attm" />
+                    <TextBlock x:Name="DirtyStatusText" Style="{StaticResource StatusText}" Text=" · 已保存" />
+                </StackPanel>
+
+                <TextBlock x:Name="InfoText" Grid.Column="1" Style="{StaticResource StatusText}"
+                           Margin="18,0" HorizontalAlignment="Left"
+                           Text="BPM 120 · C 大调 · 4/4 · 0 音符 · 0:00" />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="ErrorCountText" Style="{StaticResource StatusText}"
+                               Foreground="{DynamicResource Brush.Success}" Text="错误 0" />
+                    <TextBlock Style="{StaticResource StatusText}" Text=" · " />
+                    <TextBlock x:Name="PlaybackStatusText" Style="{StaticResource StatusText}" Text="就绪" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
