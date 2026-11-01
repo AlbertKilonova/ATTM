@@ -23,6 +23,12 @@ public sealed class AppConfig
 
     public bool AutoScrollOnPlay { get; set; } = true;
 
+    /// <summary>被禁用的插件 dll 文件名（插件管理器写入，重启后生效）。</summary>
+    public List<string> DisabledPlugins { get; set; } = new();
+
+    /// <summary>用户确认过无沙箱权限的插件，格式 "id@version"。</summary>
+    public List<string> ApprovedPlugins { get; set; } = new();
+
     /// <summary>右侧乐句预览侧边栏是否展开。</summary>
     public bool PhrasePreviewVisible { get; set; }
 

@@ -138,6 +138,27 @@ if (Test-Path $samples) {
     Copy-Item $samples (Join-Path $appDir "samples") -Recurse -Force
 }
 
+# 插件：单独构建后放进 app\plugins（要在打包之前完成，否则 zip 里没有插件）
+$pluginProject = Join-Path $root "plugins\ATTM.Plugin.MidiImport\ATTM.Plugin.MidiImport.csproj"
+if (Test-Path $pluginProject) {
+    Write-Host ""
+    Write-Host "构建插件..." -ForegroundColor Cyan
+
+    & dotnet build $pluginProject -c $Configuration -v q --nologo
+    if ($LASTEXITCODE -ne 0) { throw "插件构建失败（退出码 $LASTEXITCODE）" }
+
+    $pluginSrc = Join-Path $root "plugins\ATTM.Plugin.MidiImport\bin\$Configuration\net10.0-windows\ATTM.Plugin.MidiImport.dll"
+    if (Test-Path $pluginSrc) {
+        $pluginDir = Join-Path $appDir "plugins"
+        New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+        Copy-Item $pluginSrc $pluginDir -Force
+        Write-Host "  plugins\ATTM.Plugin.MidiImport.dll" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  没找到插件输出，跳过" -ForegroundColor Yellow
+    }
+}
+
 # 压缩包
 $zipPath = Join-Path $distRoot "$name.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
