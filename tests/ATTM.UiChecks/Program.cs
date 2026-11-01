@@ -31,7 +31,9 @@ internal static class Program
         var app = new App();
         app.InitializeComponent();
 
-        var originalTheme = AppConfig.Load().Theme;
+        var startupConfig = AppConfig.Load();
+        var originalTheme = startupConfig.Theme;
+        var originalPhraseVisible = startupConfig.PhrasePreviewVisible;
 
         var window = new MainWindow();
         window.Show();
@@ -72,6 +74,10 @@ internal static class Program
             editor is null ? "(null)" : $"{editor.ActualWidth:F0}x{editor.ActualHeight:F0}");
 
         if (editor is null) return Finish(window);
+
+        // 乐句预览侧边栏不参与其它检查：先强制收起
+        editor.SetPhrasePreviewVisible(false, animate: false);
+        Pump(120);
 
         Check("编辑器初始模板可解析", () => InfoTextOf(window).Contains("音符"), InfoTextOf(window));
 
@@ -377,6 +383,151 @@ bpm = 120
                    && midi is not null && midi.EndsWith("测试谱.mid", StringComparison.Ordinal);
         });
 
+        // ---------------------------------------------------------- 乐句预览
+
+        const char nl = (char)10;
+        var phraseScore = "bpm = 120" + nl + "1 = C 4/4" + nl + nl
+            + "+5,000000+2+#2,+3,0" + nl + "-4,(-61),-4,(-61)" + nl + nl
+            + "1,2,3,4" + nl + nl
+            + "5,6,7,+1";
+
+        editor.Text = phraseScore;
+        Pump(500);
+
+        var phraseButton = window.FindName("PhraseButton") as ToggleButton;
+        var minimap = Descendants(window).OfType<EditorMinimap>().FirstOrDefault();
+        var phrase = editor.PhrasePreview;
+
+        Check("乐句预览：工具栏有切换按钮", () => phraseButton is not null && phraseButton.Content is string);
+
+        phraseButton!.IsChecked = true;
+        phraseButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Pump(500);
+
+        var panelLeft = phrase.TranslatePoint(new Point(0, 0), editor).X;
+        var mapRight = minimap is null
+            ? 0
+            : minimap.TranslatePoint(new Point(minimap.ActualWidth, 0), editor).X;
+
+        Console.WriteLine($"      面板 {phrase.ActualWidth:F0}px，左边 x={panelLeft:F0}，缩略图右边缘 x={mapRight:F0}");
+        Check("乐句预览：展开在缩略图右侧",
+            () => editor.IsPhrasePreviewVisible && phrase.ActualWidth >= 440 && panelLeft >= mapRight - 1);
+
+        editor.ShowPhrase(0);
+        Pump(700);
+        var firstPhrase = phrase.CurrentText;
+        Console.WriteLine($"      第 1 小节：{firstPhrase.Replace(nl.ToString(), " | ")}");
+        Check("乐句预览：一行并行声部都显示出来",
+            () => phrase.Lines.Count == 2
+                  && firstPhrase == "+5,000000+2+#2,+3,0" + nl + "-4,(-61),-4,(-61)");
+
+        Check("乐句预览：换句时文字从行外滑入", () =>
+        {
+            editor.ShowPhrase(1);
+            Pump(120);
+            var midway = phrase.RevealProgress;
+
+            Pump(700);
+            var settled = phrase.RevealProgress;
+
+            Console.WriteLine($"      120ms 进度 {midway:F2}，700ms 后 {settled:F2}");
+            return midway is > 0.02 and < 0.98 && settled >= 0.999;
+        });
+
+        Check("乐句预览：沿用编辑器的语法配色", () =>
+        {
+            editor.ShowPhrase(0);
+            Pump(600);
+
+            var classes = phrase.Lines.SelectMany(line => line.Runs).Select(run => run.Class).Distinct().ToList();
+            Console.WriteLine("      高亮类别：" + string.Join(", ", classes));
+
+            return classes.Contains(EditorTokenClass.Octave)
+                   && classes.Contains(EditorTokenClass.Note)
+                   && classes.Contains(EditorTokenClass.Punctuation)
+                   && classes.Contains(EditorTokenClass.Sharp);
+        });
+
+        Check("乐句预览：大字排版不重叠、不裁切", () =>
+        {
+            editor.Text = "bpm = 120" + nl + "1 = C 4/4" + nl + nl + "1,2,3,4";
+            Pump(500);
+            editor.ShowPhrase(0);
+            Pump(800);
+
+            var expected = phrase.LastTextWidth;
+            var (left, right) = InkBounds(phrase, 44);
+            var ink = right - left;
+
+            editor.Text = phraseScore;
+            Pump(400);
+
+            Console.WriteLine($"      字号 {phrase.LastFontSize:F0}，排版宽 {expected:F0}px，墨迹宽 {ink:F0}px");
+            return expected > 80 && ink > expected * 0.9 && ink < expected * 1.15;
+        });
+
+        Check("乐句预览：播放时自动跟随当前小节", () =>
+        {
+            editor.SetCaret(0);
+            var play = (Button)window.FindName("PlayPauseButton")!;
+            var stop = (Button)window.FindName("StopButton")!;
+
+            play.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(900);
+            var duringPlay = phrase.HasContent && phrase.MeasureIndex == 0;
+
+            stop.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(500);
+
+            Console.WriteLine($"      播放中出现={duringPlay}，停止后行数={phrase.Lines.Count}");
+            return duringPlay && !phrase.HasContent;
+        });
+
+        Check("乐句预览：实时框出正在播放的音", () =>
+        {
+            editor.SetCaret(0);
+            var play = (Button)window.FindName("PlayPauseButton")!;
+            var stop = (Button)window.FindName("StopButton")!;
+
+            play.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+            var samples = new List<string>();
+            for (var i = 0; i < 10; i++)
+            {
+                Pump(160);
+                var ranges = phrase.ActiveRanges;
+                if (ranges.Count == 0) continue;
+
+                var text = phrase.Lines[ranges[0].Line].Text;
+                var mark = ranges[0];
+                var piece = text.Substring(mark.Start, Math.Min(mark.Length, text.Length - mark.Start));
+                if (!samples.Contains(piece)) samples.Add(piece);
+            }
+
+            stop.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(300);
+
+            Console.WriteLine($"      采样到的音：{string.Join(" / ", samples)}");
+            return samples.Count >= 2 && phrase.ActiveRanges.Count == 0;
+        });
+
+        Check("乐句预览：再次点击收起", () =>
+        {
+            phraseButton.IsChecked = false;
+            phraseButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(500);
+            var collapsed = !editor.IsPhrasePreviewVisible && editor.PhrasePanelWidth < 1;
+
+            // 截图用：重新展开并显示第一句
+            phraseButton.IsChecked = true;
+            phraseButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(500);
+            editor.ShowPhrase(0);
+            Pump(600);
+
+            return collapsed && phrase.HasContent;
+        });
+
         // ---------------------------------------------------------- 主题切换
 
         ThemeService.SetTheme(false);
@@ -423,6 +574,7 @@ bpm = 120
         {
             var restore = AppConfig.Load();
             restore.Theme = originalTheme;
+            restore.PhrasePreviewVisible = originalPhraseVisible;
             restore.Save();
             ThemeService.SetMode(restore.Mode);
         }
@@ -592,6 +744,44 @@ bpm = 120
 
     /// <summary>把一个元素画到位图上，统计文本区里"和背景不同"的像素数（深浅主题通用）。</summary>
     /// <summary>统计元素与背景色的平均亮度差，用来判断"是不是太抢眼"。</summary>
+    /// <summary>元素上非背景像素的横向范围（跳过顶部若干行，避开标题）。</summary>
+    private static (double Left, double Right) InkBounds(FrameworkElement element, int topSkip)
+    {
+        var width = (int)Math.Max(1, element.ActualWidth);
+        var height = (int)Math.Max(1, element.ActualHeight);
+        if (width <= 2 || height <= topSkip + 2) return (0, 0);
+
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        bitmap.CopyPixels(pixels, stride, 0);
+
+        int bgB = pixels[(topSkip * width + 1) * 4], bgG = pixels[(topSkip * width + 1) * 4 + 1], bgR = pixels[(topSkip * width + 1) * 4 + 2];
+
+        var left = width;
+        var right = -1;
+        for (var y = topSkip; y < height; y++)
+        {
+            for (var x = 1; x < width; x++)
+            {
+                var i = (y * width + x) * 4;
+                var delta = Math.Abs(pixels[i] - bgB) + Math.Abs(pixels[i + 1] - bgG) + Math.Abs(pixels[i + 2] - bgR);
+                if (delta <= 24) continue;
+
+                if (x < left) left = x;
+                if (x > right) right = x;
+            }
+        }
+
+        return right < 0 ? (0, 0) : (left, right + 1);
+    }
+
     private static double MeanDeviation(FrameworkElement element)
     {
         var width = (int)Math.Max(1, element.ActualWidth);

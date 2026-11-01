@@ -100,6 +100,9 @@ Vel = 90 +-0
             _deviceName = _config.MidiOutputDevice;
             ApplyMidiDevice(_config.MidiOutputDevice);
 
+            PhraseButton.IsChecked = _config.PhrasePreviewVisible;
+            Editor.SetPhrasePreviewVisible(_config.PhrasePreviewVisible, animate: false);
+
             // 双击 .attm 打开时，命令行参数里带着文件路径
             if (!string.IsNullOrWhiteSpace(initialFile) && File.Exists(initialFile))
                 LoadFile(initialFile);
@@ -254,6 +257,7 @@ Vel = 90 +-0
         if (_player.State == PlayerState.Stopped)
         {
             Editor.SetPlaybackSpans(null);
+            Editor.HidePhrase();
             _hasHighlight = false;
             return;
         }
@@ -261,6 +265,8 @@ Vel = 90 +-0
         var spans = _player.GetActiveSpans();
         Editor.SetPlaybackSpans(spans);
         _hasHighlight = spans.Count > 0;
+
+        if (Editor.IsPhrasePreviewVisible) Editor.ShowPhrase(GetPlayingMeasure());
 
         if (_config.AutoScrollOnPlay && spans.Count > 0)
             Editor.ScrollOffsetIntoView(spans[0].Start);
@@ -275,9 +281,45 @@ Vel = 90 +-0
     private void ClearHighlight()
     {
         Editor.SetPlaybackSpans(null);
+        Editor.HidePhrase();
         _hasHighlight = false;
         _lastSecond = -1;
         UpdateStatus();
+    }
+
+    /// <summary>当前播放位置落在第几个小节（0 起）。</summary>
+    private int GetPlayingMeasure()
+    {
+        var score = _player.Score;
+        if (score is null || score.MeasureCount <= 0) return 0;
+
+        var ticks = _player.Position.TotalSeconds / score.SecondsPerTick;
+        var index = (int)Math.Floor(ticks / Math.Max(1, score.MeasureTicks));
+        return Math.Clamp(index, 0, score.MeasureCount - 1);
+    }
+
+    /// <summary>展开乐句预览时，如果窗口太窄就把窗口撑宽一点，免得正文被挤没。</summary>
+    private void EnsurePhraseRoom(bool visible)
+    {
+        const double minWithPanel = 1180;
+
+        MinWidth = visible ? minWithPanel : 720;
+
+        if (visible && WindowState == WindowState.Normal && Width < minWithPanel)
+            Width = minWithPanel;
+    }
+
+    private void PhraseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var visible = PhraseButton.IsChecked == true;
+
+        Editor.SetPhrasePreviewVisible(visible);
+        EnsurePhraseRoom(visible);
+        _config.PhrasePreviewVisible = visible;
+        _config.Save();
+
+        if (visible && _player.State != PlayerState.Stopped)
+            Editor.ShowPhrase(GetPlayingMeasure());
     }
 
     private void UpdateStatus()

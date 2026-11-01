@@ -23,6 +23,9 @@ public sealed class AppConfig
 
     public bool AutoScrollOnPlay { get; set; } = true;
 
+    /// <summary>右侧乐句预览侧边栏是否展开。</summary>
+    public bool PhrasePreviewVisible { get; set; }
+
     // 窗口位置与大小（首次运行没有值时为空，用居中默认）
     public int? WindowLeft { get; set; }
     public int? WindowTop { get; set; }

@@ -646,3 +646,19 @@ Brush.Gutter / Brush.GutterText / Brush.CurrentLine
   只接受真实存在的文件），再传给 `MainWindow(string? initialFile)`，在 Loaded 里调用 `LoadFile`。
 - 参数不存在时回退到新建模板，不会弹错误。
 - 测试：`命令行参数能打开 .attm（双击关联）`、`不存在的命令行参数回退到新建模板`。
+
+### 2026-11-01 乐句预览侧边栏
+
+- 工具栏新增切换按钮（Material Symbols `subtitles` U+E048），在缩略图右边再展开一块 460px 的侧边栏。
+- `Editing/PhrasePreview.cs`：自绘面板，整行只排一次 FormattedText、再用 `SetForegroundBrush`
+  按 token 上色，配色/字体与编辑器完全一致（第一版是分段各排一次，字距会错乱）。
+- 换小节时整组文字逐行从"行框外"滑入（偶数行从左、奇数行从右，每行错峰 80ms，
+  用 PushClip 裁到行框内），旧的一组同时淡出。进度用 TickCount64 自己算，
+  `DispatcherTimer` 只负责触发重绘——离屏/虚拟显示环境下 WPF 动画时钟可能不推进。
+- 实时高亮：`SetActiveSpans` 把"正在发声的音"映射成行内列区间，绘制时在该列区间下面垫
+  一层 PlayHighlight 矩形 + 2px 主题色下边线，跟着文字一起滑动。
+- 播放位置换算小节：`ticks / MeasureTicks`，静音段也能正确定位；停止时淡出消失。
+- 侧边栏宽度自己驱动（16ms 定时器 + CubicEase），不用 WPF 动画，测试可确定性验证。
+- 展开时窗口最小宽度提到 1180，太窄自动撑宽，避免正文被挤没。
+- 新增 6 项界面检查：按钮存在、展开在缩略图右侧、并行声部两行都显示、逐行滑入、
+  语法配色沿用、实时框选、重复点击收起、大字排版不重叠（墨迹宽度对比排版宽度）。
