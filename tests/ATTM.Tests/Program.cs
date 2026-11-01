@@ -625,6 +625,29 @@ internal static class Program
             return result.CanPlay;
         });
 
+        Check("谱库目录固定是 音乐ATTM", () =>
+        {
+            var music = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+            if (string.IsNullOrEmpty(music)) music = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var expected = Path.Combine(music, "ATTM");
+
+            var library = AppConfig.LibraryFolder;
+
+            // 即使上次保存到了别处，谱库也不跟着跑
+            var config = new AppConfig { DefaultSaveFolder = Path.GetTempPath() };
+            var saveFolder = AppConfig.ResolveSaveFolder(config);
+
+            Console.WriteLine($"      谱库 {library}");
+            Console.WriteLine($"      上次保存目录存在时：保存用 {saveFolder}");
+
+            return string.Equals(library, expected, StringComparison.OrdinalIgnoreCase)
+                   && Directory.Exists(library)
+                   && string.Equals(
+                       saveFolder.TrimEnd(Path.DirectorySeparatorChar),
+                       Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar),
+                       StringComparison.OrdinalIgnoreCase);
+        });
+
         Check("示例谱子都能解析", () =>
         {
             var root = FindRepoRoot();

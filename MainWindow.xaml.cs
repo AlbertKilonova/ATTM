@@ -505,7 +505,8 @@ $ legato(10223050) # legato() 表示连奏
     /// <summary>打开谱库文件夹（音乐\ATTM），在里面双击 .attm 就会用本程序打开。</summary>
     private void OpenLibraryFolder()
     {
-        var folder = AppConfig.ResolveSaveFolder(_config);
+        // 谱库固定是"音乐\ATTM"，不跟随上次保存到哪
+        var folder = AppConfig.LibraryFolder;
 
         try
         {

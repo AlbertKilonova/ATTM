@@ -49,19 +49,33 @@ public sealed class AppConfig
 
     public static string ConfigPath => Path.Combine(ConfigDirectory, "config.json");
 
-    /// <summary>保存目录：上次用过的目录，否则 音乐\ATTM（不存在就建出来）。</summary>
-    public static string ResolveSaveFolder(AppConfig config)
+    /// <summary>
+    /// 谱库目录：固定是"音乐\ATTM"（系统默认音乐文件夹），不存在就建出来。
+    /// 与"上次保存到哪"无关——打开谱库永远回到这里。
+    /// </summary>
+    public static string LibraryFolder
     {
-        var folder = config.DefaultSaveFolder;
-
-        if (string.IsNullOrWhiteSpace(folder))
+        get
         {
             var music = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
             if (string.IsNullOrEmpty(music))
                 music = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            folder = Path.Combine(music, "ATTM");
+            var folder = Path.Combine(music, "ATTM");
+
+            try { Directory.CreateDirectory(folder); }
+            catch { /* 建不出来就交给调用方报错 */ }
+
+            return folder;
         }
+    }
+
+    /// <summary>保存目录：上次用过的目录，否则 音乐\ATTM（不存在就建出来）。</summary>
+    public static string ResolveSaveFolder(AppConfig config)
+    {
+        var folder = string.IsNullOrWhiteSpace(config.DefaultSaveFolder)
+            ? LibraryFolder
+            : config.DefaultSaveFolder;
 
         try { Directory.CreateDirectory(folder); }
         catch { /* 建不出来就让对话框报错 */ }

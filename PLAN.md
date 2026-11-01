@@ -776,3 +776,14 @@ Brush.Gutter / Brush.GutterText / Brush.CurrentLine
   连奏 / 并行声部"七段组织，每段都配可直接播放的示例，12 个小节覆盖全部语法。
 - 之前 `_probe.cs` 临时文件混进根目录顶替了入口点（CS7022），导致本地构建"成功但启动异常"，
   已删除；以后验证语法一律用独立临时项目。
+
+### 2026-11-01 修"打开谱库文件夹"跳错目录
+
+- 现象：点工具栏打开键，资源管理器跳到了"上次保存的目录"，而不是 音乐\ATTM。
+- 原因：`OpenLibraryFolder()` 用的是 `AppConfig.ResolveSaveFolder(_config)`，
+  它会优先返回 `config.DefaultSaveFolder`（上次另存为的目录）；测试把一份谱子存到
+  samples 里，配置就被带偏了。
+- 修法：新增 `AppConfig.LibraryFolder`（固定 = 系统音乐文件夹\ATTM，不存在就建），
+  打开谱库只认它；`ResolveSaveFolder` 在没记过目录时也复用它。
+- 测试：`谱库目录固定是 音乐ATTM`（断言 LibraryFolder 等于 MyMusic\ATTM，
+  且即使 DefaultSaveFolder 指向别处，保存目录才跟随、谱库不跟随）。
