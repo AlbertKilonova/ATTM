@@ -490,6 +490,64 @@ bpm = 120
             return expected > 80 && ink > expected * 0.9 && ink < expected * 1.15;
         });
 
+        Check("语法高亮：升八度和降八度分开配色", () =>
+        {
+            editor.Text = "bpm = 120" + nl + "1 = C 4/4" + nl + nl + "+1,-1,+2,-2,1,2";
+            Pump(500);
+
+            var up = ContainsColor(editor, "#FFC792EA", 24);
+            var down = ContainsColor(editor, "#FF5FC8D8", 24);
+
+            editor.Text = phraseScore;
+            Pump(400);
+
+            Console.WriteLine($"      升八度 #C792EA={up}，降八度 #5FC8D8={down}");
+            return up && down;
+        });
+
+        Check("乐句预览：入场缓出、出场缓入", () =>
+        {
+            var enter = new[] { 0.0, 0.25, 0.5, 0.75, 1.0 }.Select(PhrasePreview.EnterCurve).ToArray();
+            var exit = new[] { 0.0, 0.25, 0.5, 0.75, 1.0 }.Select(PhrasePreview.ExitCurve).ToArray();
+
+            Console.WriteLine($"      入场 {string.Join(" ", enter.Select(v => v.ToString("F2"))) }");
+            Console.WriteLine($"      出场 {string.Join(" ", exit.Select(v => v.ToString("F2"))) }");
+
+            // 入场：前 1/4 时间已经走了大半（快起步、慢收尾）
+            var easeOut = enter[1] > 0.5 && enter[3] > 0.95;
+            // 出场：前 1/4 时间几乎没动（慢起步、后段加速离开）
+            var easeIn = exit[1] > 0.95 && exit[3] < 0.6;
+
+            return easeOut && easeIn
+                   && Math.Abs(enter[0]) < 0.001 && Math.Abs(enter[4] - 1) < 0.001
+                   && Math.Abs(exit[0] - 1) < 0.001 && Math.Abs(exit[4]) < 0.001;
+        });
+
+        Check("乐句预览：动画帧只重绘不重排", () =>
+        {
+            editor.SetPhrasePreviewVisible(true, animate: false);
+            editor.ShowPhrase(0);
+            Pump(600);
+
+            var beforeBuild = phrase.LayoutBuildCount;
+            var beforeFrames = phrase.RenderCount;
+            var beforeMs = phrase.RenderMilliseconds;
+
+            for (var i = 0; i < 40; i++)
+            {
+                phrase.InvalidateVisual();
+                Pump(12);
+                RenderOnce(phrase);
+            }
+
+            var frames = phrase.RenderCount - beforeFrames;
+            var perFrame = frames == 0 ? 999 : (phrase.RenderMilliseconds - beforeMs) / frames;
+            var rebuilt = phrase.LayoutBuildCount - beforeBuild;
+
+            Console.WriteLine($"      {frames} 帧，{perFrame:F2} ms/帧，排版重建 {rebuilt} 次");
+            return rebuilt <= 1 && frames >= 20 && perFrame < 1.5;
+        });
+
         Check("乐句预览：播放时自动跟随当前小节", () =>
         {
             editor.SetCaret(0);
@@ -768,6 +826,21 @@ bpm = 120
 
     /// <summary>把一个元素画到位图上，统计文本区里"和背景不同"的像素数（深浅主题通用）。</summary>
     /// <summary>统计元素与背景色的平均亮度差，用来判断"是不是太抢眼"。</summary>
+    /// <summary>把元素渲染一帧（用于测单帧成本）。</summary>
+    private static void RenderOnce(FrameworkElement element)
+    {
+        var width = (int)Math.Max(1, element.ActualWidth);
+        var height = (int)Math.Max(1, element.ActualHeight);
+        if (width <= 2 || height <= 2) return;
+
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+    }
+
     /// <summary>元素上非背景像素的横向范围（跳过顶部若干行，避开标题）。</summary>
     private static (double Left, double Right) InkBounds(FrameworkElement element, int topSkip)
     {

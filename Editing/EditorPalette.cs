@@ -25,6 +25,7 @@ public sealed class EditorPalette
     public required Brush Value { get; init; }
     public required Brush Note { get; init; }
     public required Brush Octave { get; init; }
+    public required Brush OctaveDown { get; init; }
     public required Brush Sharp { get; init; }
     public required Brush Punctuation { get; init; }
     public required Brush Rest { get; init; }
@@ -34,6 +35,7 @@ public sealed class EditorPalette
         EditorTokenClass.Note => Note,
         EditorTokenClass.Rest => Rest,
         EditorTokenClass.Octave => Octave,
+        EditorTokenClass.OctaveDown => OctaveDown,
         EditorTokenClass.Sharp => Sharp,
         EditorTokenClass.Punctuation => Punctuation,
         EditorTokenClass.Comment => Comment,
@@ -62,6 +64,7 @@ public sealed class EditorPalette
         Value = Get(anchor, "Brush.Syntax.Value", "#FFFFB86C"),
         Note = Get(anchor, "Brush.Syntax.Note", "#FFE8E8ED"),
         Octave = Get(anchor, "Brush.Syntax.Octave", "#FFC792EA"),
+        OctaveDown = Get(anchor, "Brush.Syntax.OctaveDown", "#FF5FC8D8"),
         Sharp = Get(anchor, "Brush.Syntax.Sharp", "#FFFF7B72"),
         Punctuation = Get(anchor, "Brush.Syntax.Punctuation", "#FF5D6373"),
         Rest = Get(anchor, "Brush.Syntax.Rest", "#FF565B6B")

@@ -671,3 +671,19 @@ Brush.Gutter / Brush.GutterText / Brush.CurrentLine
 - 快节奏保护：如果上一句还没入场完就换句，空隙缩到 60ms，避免屏幕长时间空白。
 - 新增检查"旧句先退场、新句后入场（不重叠）"：换句后 100ms 新句进度必须为 0（旧句仍在退场），
   330ms 时已入场，最终 1.0。
+
+### 2026-11-01 乐句预览动效曲线 / 帧率 / 升降八度配色
+
+- 曲线：入场改成缓出 `1-(1-t)^3`（起步快、收尾稳），出场改成缓入 `1-t^3`
+  （起步慢、后段加速离开），两个函数提成 public static 便于测试。
+- 帧率：原来每一帧都要重新 `FitFontSize`（按 64px 量每行文字）+ 逐 run 上色 +
+  新建 RectangleGeometry，帧成本高。改成 `PhraseLayout` 排版缓存：字号、每行 FormattedText、
+  左偏移、裁剪矩形、高亮矩形只在"内容/尺寸/主题"变化时重建一次；
+  动画帧里只剩 PushTransform + DrawText。
+  动画时钟也从 16ms DispatcherTimer 换成 `CompositionTarget.Rendering`（与渲染同步），
+  另留一个 200ms 的 DispatcherTimer 兜底（离屏环境没有渲染事件）。
+  实测 40 帧 0.68 ms/帧、排版重建 0 次。
+- 配色：`+`（升八度）和 `-`（降八度）分开着色。新增 `EditorTokenClass.OctaveDown` 与
+  主题资源 `Brush.Syntax.OctaveDown`（深色 #FF5FC8D8、浅色 #FF0E7C86），升号仍是紫色
+  （深 #FFC792EA / 浅 #FF7C3AED）。编辑器和乐句预览同时生效。
+- 界面检查加到 48 项：新增"升八度/降八度分开配色""入场缓出、出场缓入""动画帧只重绘不重排"。

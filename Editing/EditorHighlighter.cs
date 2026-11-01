@@ -7,6 +7,7 @@ public enum EditorTokenClass
     Note,
     Rest,
     Octave,
+    OctaveDown,
     Sharp,
     Punctuation,
     Comment,
@@ -83,7 +84,8 @@ public static class EditorHighlighter
                 ? EditorTokenClass.Value
                 : token.Text == "0" ? EditorTokenClass.Rest : EditorTokenClass.Note,
             TokenKind.Dot => EditorTokenClass.Value,
-            TokenKind.Plus or TokenKind.Minus => EditorTokenClass.Octave,
+            TokenKind.Plus => EditorTokenClass.Octave,
+            TokenKind.Minus => EditorTokenClass.OctaveDown,
             TokenKind.Sharp => EditorTokenClass.Sharp,
             TokenKind.Comma or TokenKind.LParen or TokenKind.RParen or TokenKind.Slash or TokenKind.Equals
                 => EditorTokenClass.Punctuation,

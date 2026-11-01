@@ -8,8 +8,10 @@ namespace ATTM.Editing;
 
 /// <summary>
 /// 侧边栏里的"乐句预览"：用超大字号显示当前播放到的那一小节（含并行声部的每一行），
-/// 换小节时整组文字从行框外滑入并淡入，播放结束后淡出消失。
-/// 配色、字体、语法高亮与编辑器完全一致。
+/// 换小节时先让旧句淡出、再让新句逐行滑入，并实时框出正在发声的音。
+///
+/// 性能：整段排版（字号、每行 FormattedText、裁剪矩形、高亮矩形）只在内容/尺寸/主题变化时
+/// 重建一次，动画帧里只做 PushTransform + DrawText，所以 60fps 下也很轻。
 /// </summary>
 public sealed class PhrasePreview : FrameworkElement
 {
@@ -19,36 +21,45 @@ public sealed class PhrasePreview : FrameworkElement
     private const double HeaderHeight = 38;
     private const double MaxFontSize = 64;
     private const double MinFontSize = 14;
-    private const double InDurationMs = 340;
-    private const double OutDurationMs = 150;
 
-    /// <summary>旧句淡出后到新句入场之间的空隙，避免两段文字在屏幕上重叠。</summary>
+    // 入场：缓出（起步快、收尾稳）；出场：缓入（起步慢、后段加速离开）
+    private const double InDurationMs = 320;
+    private const double OutDurationMs = 170;
+
+    /// <summary>旧句退完到新句入场之间的空隙，避免两段文字在屏幕上重叠。</summary>
     private const double InDelayMs = 190;
 
     /// <summary>快节奏换句时的空隙（上一句还没入场完就换句）。</summary>
     private const double RushDelayMs = 60;
 
     private const double LineStaggerMs = 80;
-    private const double OutStaggerMs = 40;
+    private const double OutStaggerMs = 32;
     private const double SlideDistance = 64;
 
     private readonly List<PhraseLine> _current = new();
     private readonly List<ActiveRange> _active = new();
+    private readonly List<Mark> _marks = new();
+
     private OutgoingPhrase? _outgoing;
+    private PhraseLayout? _layout;
+    private int _contentRevision;
 
     private long _inStartedAt;
     private EditorPalette _palette = EditorPalette.CreateFallback();
     private Brush _background = Brushes.Black;
     private Typeface _typeface;
-    private DispatcherTimer? _timer;
+    private Typeface _uiTypeface;
+
+    private bool _frameHooked;
+    private DispatcherTimer? _watchdog;
 
     public PhrasePreview()
     {
         _typeface = CreateTypeface();
+        _uiTypeface = CreateUiTypeface();
+
         ClipToBounds = true;
         SnapsToDevicePixels = true;
-
-        // 固定宽度 + 右对齐：宿主用 0 -> 宽度的裁剪来"从右侧拉出来"，高度自适应
         Width = PanelWidth;
         HorizontalAlignment = HorizontalAlignment.Right;
         VerticalAlignment = VerticalAlignment.Stretch;
@@ -62,16 +73,24 @@ public sealed class PhrasePreview : FrameworkElement
     /// <summary>总小节数，用于顶部计数显示。</summary>
     public int MeasureCount { get; private set; }
 
+    public bool HasContent => _current.Count > 0;
+
     /// <summary>当前正在发声的音（相对每个乐句行的列区间）。</summary>
     public IReadOnlyList<ActiveRange> ActiveRanges => _active;
 
-    /// <summary>最近一次绘制用的字号（供测试/诊断）。</summary>
-    public double LastFontSize { get; private set; }
+    /// <summary>最近一次排版用的字号（供测试/诊断）。</summary>
+    public double LastFontSize => _layout?.FontSize ?? 0;
 
-    /// <summary>最近一次绘制的那一行文字排版宽度（供测试/诊断）。</summary>
-    public double LastTextWidth { get; private set; }
+    /// <summary>最近一次排版里最宽一行的宽度（供测试/诊断）。</summary>
+    public double LastTextWidth => _layout?.MaxTextWidth ?? 0;
 
-    public bool HasContent => _current.Count > 0;
+    /// <summary>排版缓存重建次数（动画期间不应该增长）。</summary>
+    public int LayoutBuildCount { get; private set; }
+
+    /// <summary>OnRender 调用次数与累计耗时（供性能检查）。</summary>
+    public int RenderCount { get; private set; }
+
+    public double RenderMilliseconds { get; private set; }
 
     public bool IsAnimating
     {
@@ -89,7 +108,7 @@ public sealed class PhrasePreview : FrameworkElement
         get
         {
             if (_current.Count == 0) return 0;
-            return ProgressOf(_current.Count - 1, Now() - _inStartedAt);
+            return EnterProgress(_current.Count - 1, Now() - _inStartedAt);
         }
     }
 
@@ -99,31 +118,40 @@ public sealed class PhrasePreview : FrameworkElement
     {
         _palette = palette;
         _typeface = CreateTypeface();
+        _uiTypeface = CreateUiTypeface();
         _background = palette.GutterBackground;
+
+        _layout = null;
+        _marks.Clear();
         InvalidateVisual();
     }
+
+    // ------------------------------------------------------------ 内容
 
     /// <summary>显示某一小节的乐句；与当前相同时不重复播放动画。</summary>
     public void Show(int measureIndex, IReadOnlyList<PhraseLine> lines, int measureCount = 0)
     {
         if (measureIndex == MeasureIndex && SameLines(lines)) return;
 
-        // 上一句还没入场完就又换句（快节奏时）：缩短退场与空隙，别让屏幕一直空着
+        // 上一句还没入场完就又换句（快节奏）：缩短退场与空隙，别让屏幕一直空着
         var rush = _current.Count > 0 && RevealProgress < 1;
 
         if (_current.Count > 0)
-            _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), AlphaOfCurrent(), Now());
+            _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), _layout, AlphaOfCurrent(), Now());
 
         _current.Clear();
         _current.AddRange(lines);
         _active.Clear();
+        _marks.Clear();
+        _layout = null;
+        _contentRevision++;
         MeasureIndex = measureIndex;
         MeasureCount = measureCount;
 
-        // 先让旧句退场，过一小段空隙再入场（新句在这段时间里进度为 0，不会画出来）
+        // 先让旧句退场，过一小段空隙再入场（这段时间新句进度为 0，不会被画出来）
         _inStartedAt = (long)(Now() + (rush ? RushDelayMs : InDelayMs));
 
-        StartTimer();
+        StartFrames();
         InvalidateVisual();
     }
 
@@ -132,16 +160,17 @@ public sealed class PhrasePreview : FrameworkElement
     {
         if (_current.Count == 0 && _outgoing is null) return;
 
-        // 上一句还没入场完就又换句（快节奏时）：缩短退场与空隙，别让屏幕一直空着
-        var rush = _current.Count > 0 && RevealProgress < 1;
-
         if (_current.Count > 0)
-            _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), AlphaOfCurrent(), Now());
+            _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), _layout, AlphaOfCurrent(), Now());
 
         _current.Clear();
         _active.Clear();
+        _marks.Clear();
+        _layout = null;
+        _contentRevision++;
         MeasureIndex = -1;
-        StartTimer();
+
+        StartFrames();
         InvalidateVisual();
     }
 
@@ -171,7 +200,21 @@ public sealed class PhrasePreview : FrameworkElement
 
         _active.Clear();
         _active.AddRange(next);
+        EnsureLayout();
+        UpdateMarks();
         InvalidateVisual();
+    }
+
+    private bool SameLines(IReadOnlyList<PhraseLine> lines)
+    {
+        if (lines.Count != _current.Count) return false;
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!string.Equals(lines[i].Text, _current[i].Text, StringComparison.Ordinal)) return false;
+        }
+
+        return true;
     }
 
     private bool SameActive(List<ActiveRange> next)
@@ -190,78 +233,174 @@ public sealed class PhrasePreview : FrameworkElement
 
     private static long Now() => Environment.TickCount64;
 
-    private void StartTimer()
+    /// <summary>入场曲线：缓出（1-(1-t)^3），起步快、收尾稳。</summary>
+    public static double EnterCurve(double t)
     {
-        if (_timer is not null) return;
-
-        _timer = new DispatcherTimer(DispatcherPriority.Render)
-        {
-            Interval = TimeSpan.FromMilliseconds(16)
-        };
-
-        _timer.Tick += (_, _) =>
-        {
-            InvalidateVisual();
-            if (IsAnimating) return;
-
-            _timer?.Stop();
-            _timer = null;
-        };
-
-        _timer.Start();
+        var clamped = Math.Clamp(t, 0.0, 1.0);
+        return 1 - Math.Pow(1 - clamped, 3);
     }
 
-    private static double ProgressOf(int index, double elapsedMs)
+    /// <summary>出场曲线：缓入（1-t^3），起步慢、后段加速离开。</summary>
+    public static double ExitCurve(double t)
     {
-        var local = (elapsedMs - index * LineStaggerMs) / InDurationMs;
-        return Ease(Math.Clamp(local, 0.0, 1.0));
+        var clamped = Math.Clamp(t, 0.0, 1.0);
+        return 1 - clamped * clamped * clamped;
     }
 
-    private static double Ease(double t) => 1 - Math.Pow(1 - t, 3);
+    private static double EnterProgress(int index, double elapsedMs)
+        => EnterCurve((elapsedMs - index * LineStaggerMs) / InDurationMs);
+
+    private static double ExitProgress(int index, double elapsedMs)
+        => ExitCurve((elapsedMs - index * OutStaggerMs) / OutDurationMs);
 
     private double AlphaOfCurrent()
     {
         if (_current.Count == 0) return 0;
-        return ProgressOf(_current.Count - 1, Now() - _inStartedAt);
+        return EnterProgress(_current.Count - 1, Now() - _inStartedAt);
     }
 
-    private bool SameLines(IReadOnlyList<PhraseLine> lines)
+    private void StartFrames()
     {
-        if (lines.Count != _current.Count) return false;
-
-        for (var i = 0; i < lines.Count; i++)
+        if (!_frameHooked)
         {
-            if (!string.Equals(lines[i].Text, _current[i].Text, StringComparison.Ordinal)) return false;
+            CompositionTarget.Rendering += OnFrame;
+            _frameHooked = true;
         }
 
-        return true;
+        // 兜底：离屏/无渲染循环时也能推进并收尾
+        if (_watchdog is not null) return;
+
+        _watchdog = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+
+        _watchdog.Tick += (_, _) =>
+        {
+            InvalidateVisual();
+            StopFramesIfIdle();
+        };
+
+        _watchdog.Start();
     }
+
+    private void OnFrame(object? sender, EventArgs e)
+    {
+        InvalidateVisual();
+        StopFramesIfIdle();
+    }
+
+    private void StopFramesIfIdle()
+    {
+        if (IsAnimating) return;
+
+        if (_frameHooked)
+        {
+            CompositionTarget.Rendering -= OnFrame;
+            _frameHooked = false;
+        }
+
+        _watchdog?.Stop();
+        _watchdog = null;
+    }
+
+    // ------------------------------------------------------------ 排版缓存
+
+    private void EnsureLayout()
+    {
+        var body = BodyRect();
+        if (body.Height < 8 || body.Width < 8)
+        {
+            _layout = null;
+            return;
+        }
+
+        if (_layout is not null
+            && Math.Abs(_layout.Width - body.Width) < 0.5
+            && Math.Abs(_layout.Height - body.Height) < 0.5)
+        {
+            return;
+        }
+
+        _layout = PhraseLayout.Build(_current, body, _palette, _typeface, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        LayoutBuildCount++;
+        UpdateMarks();
+    }
+
+    private void UpdateMarks()
+    {
+        _marks.Clear();
+        if (_layout is null || _active.Count == 0) return;
+
+        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+
+        foreach (var range in _active)
+        {
+            if (range.Line < 0 || range.Line >= _layout.Lines.Count) continue;
+
+            var text = _layout.Lines[range.Line].Text;
+            var start = Math.Clamp(range.Start, 0, text.Length);
+            var length = Math.Clamp(range.Length, 0, text.Length - start);
+            if (length <= 0) continue;
+
+            var prefixWidth = start == 0
+                ? 0
+                : LayoutHelper.Measure(text[..start], _layout.FontSize, _typeface, pixelsPerDip);
+            var pieceWidth = LayoutHelper.Measure(text.Substring(start, length), _layout.FontSize, _typeface, pixelsPerDip);
+
+            var textTop = _layout.Tops[range.Line];
+            var textHeight = _layout.Lines[range.Line].Height;
+            var left = _layout.Lefts[range.Line] + prefixWidth;
+
+            // 高亮框只罩住字形带（Lekton 的行高比字形高，按比例收一点更贴身）
+            _marks.Add(new Mark(
+                range.Line,
+                new Rect(left - 2, textTop + textHeight * 0.12, pieceWidth + 4, textHeight * 0.8)));
+        }
+    }
+
+    private Rect BodyRect() => new(0, HeaderHeight, ActualWidth, Math.Max(0, ActualHeight - HeaderHeight));
 
     // ------------------------------------------------------------ 绘制
 
     protected override void OnRender(DrawingContext dc)
     {
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        try
+        {
+            RenderCore(dc);
+        }
+        finally
+        {
+            RenderCount++;
+            RenderMilliseconds += (System.Diagnostics.Stopwatch.GetTimestamp() - startedAt)
+                                  * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
+    }
+
+    private void RenderCore(DrawingContext dc)
+    {
         var width = ActualWidth;
         var height = ActualHeight;
         if (width <= 1 || height <= 1) return;
 
-        // 背景 + 左侧分隔线（与缩略图右边缘借位，视觉上是一条缝）
         dc.DrawRectangle(_background, null, new Rect(0, 0, width, height));
         dc.DrawRectangle(_palette.Border, null, new Rect(0, 0, 1, height));
 
         DrawHeader(dc, width);
 
-        var body = new Rect(0, HeaderHeight, width, Math.Max(0, height - HeaderHeight));
+        var body = BodyRect();
         if (body.Height < 8) return;
 
         if (_outgoing is not null)
         {
-            var elapsed = Now() - _outgoing.StartedAt;
-            var visible = 1 - Math.Clamp((elapsed - (_outgoing.Lines.Count - 1) * OutStaggerMs) / OutDurationMs, 0.0, 1.0);
-            var batchAlpha = _outgoing.StartAlpha * (1 - Math.Clamp(elapsed / OutDurationMs, 0.0, 1.0));
+            var outgoing = _outgoing;
+            var elapsed = Now() - outgoing.StartedAt;
+            var lastVisible = ExitProgress(outgoing.Lines.Count - 1, elapsed);
 
-            if (visible <= 0.001 || batchAlpha <= 0.001) _outgoing = null;
-            else DrawPhrase(dc, _outgoing.Lines, body, _outgoing.StartedAt, batchAlpha, true);
+            if (lastVisible <= 0.002) _outgoing = null;
+            else DrawPhrase(dc, outgoing.Lines, outgoing.Layout, outgoing.StartedAt, outgoing.StartAlpha, true);
         }
 
         if (_current.Count == 0)
@@ -270,7 +409,10 @@ public sealed class PhrasePreview : FrameworkElement
             return;
         }
 
-        DrawPhrase(dc, _current, body, _inStartedAt, 1.0, false);
+        EnsureLayout();
+        if (_layout is null) return;
+
+        DrawPhrase(dc, _current, _layout, _inStartedAt, 1.0, false);
     }
 
     private void DrawHeader(DrawingContext dc, double width)
@@ -279,7 +421,7 @@ public sealed class PhrasePreview : FrameworkElement
             "乐句预览",
             CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
-            UiTypeface(),
+            _uiTypeface,
             12,
             _palette.GutterText,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
@@ -292,13 +434,14 @@ public sealed class PhrasePreview : FrameworkElement
                 $"第 {MeasureIndex + 1} / {MeasureCount} 小节",
                 CultureInfo.CurrentUICulture,
                 FlowDirection.LeftToRight,
-                UiTypeface(),
+                _uiTypeface,
                 12,
                 _palette.GutterText,
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
             dc.DrawText(counter, new Point(Math.Max(0, width - SidePadding - counter.Width + 4), (HeaderHeight - counter.Height) / 2));
         }
+
         dc.DrawRectangle(_palette.Border, null, new Rect(SidePadding - 4, HeaderHeight - 1, Math.Max(0, width - SidePadding * 2 + 8), 1));
     }
 
@@ -308,7 +451,7 @@ public sealed class PhrasePreview : FrameworkElement
             "播放时在这里显示当前乐句",
             CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
-            UiTypeface(),
+            _uiTypeface,
             13,
             _palette.GutterText,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
@@ -318,47 +461,34 @@ public sealed class PhrasePreview : FrameworkElement
         dc.DrawText(hint, new Point(0, body.Top + (body.Height - hint.Height) / 2));
     }
 
-    /// <param name="startedAt">这一组动画的起始时间（入场 = _inStartedAt，出场 = outgoing 起点）。</param>
-    /// <param name="batchAlpha">整组透明度。</param>
-    /// <param name="leaving">true = 正在淡出（滑动方向相反）。</param>
     private void DrawPhrase(
         DrawingContext dc,
         IReadOnlyList<PhraseLine> lines,
-        Rect body,
+        PhraseLayout? layout,
         long startedAt,
         double batchAlpha,
         bool leaving)
     {
-        if (lines.Count == 0 || batchAlpha <= 0.001) return;
-
-        var available = Math.Max(60, body.Width - SidePadding * 2);
-        var fontSize = FitFontSize(lines, available);
-        var lineHeight = fontSize * 1.5;
-        var totalHeight = lineHeight * lines.Count;
-        var top = body.Top + Math.Max(12, (body.Height - totalHeight) / 2);
+        if (layout is null || lines.Count == 0 || batchAlpha <= 0.002) return;
 
         var now = Now();
-        for (var i = 0; i < lines.Count; i++)
+
+        for (var i = 0; i < lines.Count && i < layout.Lines.Count; i++)
         {
-            // 入场逐行晚 80ms 出发；出场逐行早 40ms 走，形成"从上往下依次退场"的次序感
-            var progress = leaving
-                ? 1 - Ease(Math.Clamp((now - startedAt - i * OutStaggerMs) / OutDurationMs, 0.0, 1.0))
-                : ProgressOf(i, now - startedAt);
+            var progress = leaving ? ExitProgress(i, now - startedAt) : EnterProgress(i, now - startedAt);
+            if (progress <= 0.002) continue;
 
-            if (progress <= 0.001) continue;
-
-            // 偶数行从左边滑进来，奇数行从右边滑进来；出场沿原路滑回去
+            // 偶数行从左滑入，奇数行从右滑入；出场沿原路滑回去
             var direction = i % 2 == 0 ? -1.0 : 1.0;
             var dx = direction * SlideDistance * (1 - progress);
-
-            var lineRect = new Rect(0, top + i * lineHeight, body.Width, lineHeight);
-            var alpha = leaving ? batchAlpha : batchAlpha * Math.Clamp(progress * 1.4, 0, 1);
+            var alpha = batchAlpha * (leaving ? progress : Math.Clamp(progress * 1.4, 0, 1));
 
             dc.PushOpacity(Math.Clamp(alpha, 0, 1));
-            dc.PushClip(new RectangleGeometry(new Rect(2, lineRect.Top, Math.Max(0, body.Width - 4), lineRect.Height)));
+            dc.PushClip(layout.Clips[i]);
             dc.PushTransform(new TranslateTransform(dx, 0));
 
-            DrawLine(dc, lines[i], i, lineRect, fontSize);
+            if (!leaving) DrawMarks(dc, i);
+            dc.DrawText(layout.Lines[i], new Point(layout.Lefts[i], layout.Tops[i]));
 
             dc.Pop();
             dc.Pop();
@@ -366,97 +496,15 @@ public sealed class PhrasePreview : FrameworkElement
         }
     }
 
-    private void DrawLine(DrawingContext dc, PhraseLine line, int lineIndex, Rect lineRect, double fontSize)
+    private void DrawMarks(DrawingContext dc, int lineIndex)
     {
-        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var text = line.Text;
-        if (text.Length == 0) return;
-
-        // 整行只排一次，再用 SetForegroundBrush 上色：字距、连字都由 WPF 统一处理，
-        // 不会出现"分段各排一次"导致的字符重叠/间距错乱。
-        var full = MakeText(text, fontSize, _palette.Foreground, pixelsPerDip);
-
-        foreach (var run in line.Runs)
+        foreach (var mark in _marks)
         {
-            var start = Math.Clamp(run.Start, 0, text.Length);
-            var length = Math.Clamp(run.Length, 0, text.Length - start);
-            if (length <= 0) continue;
+            if (mark.Line != lineIndex) continue;
 
-            full.SetForegroundBrush(_palette.BrushFor(run.Class), start, length);
+            dc.DrawRectangle(_palette.PlayHighlight, null, mark.Rect);
+            dc.DrawRectangle(_palette.Accent, null, new Rect(mark.Rect.Left, mark.Rect.Bottom - 2, mark.Rect.Width, 2));
         }
-
-        var startX = lineRect.Left + Math.Max(0, (lineRect.Width - full.WidthIncludingTrailingWhitespace) / 2);
-        var y = lineRect.Top + (lineRect.Height - full.Height) / 2;
-
-        LastFontSize = fontSize;
-        LastTextWidth = full.WidthIncludingTrailingWhitespace;
-
-        DrawActiveMarks(dc, text, lineIndex, startX, lineRect, fontSize, pixelsPerDip);
-        dc.DrawText(full, new Point(startX, y));
-    }
-
-    /// <summary>把正在发声的音在乐句里框出来（跟随文字一起滑动）。</summary>
-    private void DrawActiveMarks(
-        DrawingContext dc,
-        string text,
-        int lineIndex,
-        double startX,
-        Rect lineRect,
-        double fontSize,
-        double pixelsPerDip)
-    {
-        if (_active.Count == 0) return;
-
-        foreach (var range in _active)
-        {
-            if (range.Line != lineIndex) continue;
-
-            var start = Math.Clamp(range.Start, 0, text.Length);
-            var length = Math.Clamp(range.Length, 0, text.Length - start);
-            if (length <= 0) continue;
-
-            var prefix = start > 0 ? MakeText(text[..start], fontSize, _palette.Foreground, pixelsPerDip) : null;
-            var piece = MakeText(text.Substring(start, length), fontSize, _palette.Foreground, pixelsPerDip);
-
-            var left = startX + (prefix?.WidthIncludingTrailingWhitespace ?? 0);
-            var mark = new Rect(left - 2, lineRect.Top + 3, piece.WidthIncludingTrailingWhitespace + 4, lineRect.Height - 6);
-
-            dc.DrawRectangle(_palette.PlayHighlight, null, mark);
-            dc.DrawRectangle(_palette.Accent, null, new Rect(mark.Left, mark.Bottom - 2, mark.Width, 2));
-        }
-    }
-
-    private double FitFontSize(IReadOnlyList<PhraseLine> lines, double available)
-    {
-        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var widest = 1.0;
-
-        foreach (var line in lines)
-        {
-            if (line.Text.Length == 0) continue;
-            var text = MakeText(line.Text, MaxFontSize, _palette.Foreground, pixelsPerDip);
-            widest = Math.Max(widest, text.WidthIncludingTrailingWhitespace);
-        }
-
-        var scale = available / widest;
-        return Math.Clamp(MaxFontSize * scale, MinFontSize, MaxFontSize);
-    }
-
-    private FormattedText MakeText(string text, double size, Brush brush, double pixelsPerDip) => new(
-        text,
-        CultureInfo.CurrentUICulture,
-        FlowDirection.LeftToRight,
-        _typeface,
-        size,
-        brush,
-        pixelsPerDip);
-
-    private Typeface UiTypeface()
-    {
-        var family = Application.Current?.TryFindResource("Font.UI") as FontFamily
-                     ?? new FontFamily("Microsoft YaHei UI");
-
-        return new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     }
 
     private static Typeface CreateTypeface()
@@ -467,7 +515,135 @@ public sealed class PhrasePreview : FrameworkElement
         return new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     }
 
-    private sealed record OutgoingPhrase(IReadOnlyList<PhraseLine> Lines, double StartAlpha, long StartedAt);
+    private static Typeface CreateUiTypeface()
+    {
+        var family = Application.Current?.TryFindResource("Font.UI") as FontFamily
+                     ?? new FontFamily("Microsoft YaHei UI");
+
+        return new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    }
+
+    private readonly record struct Mark(int Line, Rect Rect);
+
+    private sealed record OutgoingPhrase(
+        IReadOnlyList<PhraseLine> Lines,
+        PhraseLayout? Layout,
+        double StartAlpha,
+        long StartedAt);
+}
+
+/// <summary>一段乐句的排版结果：每行的 FormattedText、位置、裁剪矩形都预先算好。</summary>
+internal sealed class PhraseLayout
+{
+    private PhraseLayout(
+        IReadOnlyList<PhraseLine> source,
+        IReadOnlyList<FormattedText> lines,
+        double[] lefts,
+        double[] tops,
+        RectangleGeometry[] clips,
+        double fontSize,
+        double lineHeight,
+        double width,
+        double height,
+        double maxTextWidth)
+    {
+        Source = source;
+        Lines = lines;
+        Lefts = lefts;
+        Tops = tops;
+        Clips = clips;
+        FontSize = fontSize;
+        LineHeight = lineHeight;
+        Width = width;
+        Height = height;
+        MaxTextWidth = maxTextWidth;
+    }
+
+    public IReadOnlyList<PhraseLine> Source { get; }
+    public IReadOnlyList<FormattedText> Lines { get; }
+    public double[] Lefts { get; }
+    public double[] Tops { get; }
+    public RectangleGeometry[] Clips { get; }
+    public double FontSize { get; }
+    public double LineHeight { get; }
+    public double Width { get; }
+    public double Height { get; }
+    public double MaxTextWidth { get; }
+
+    public static PhraseLayout Build(
+        IReadOnlyList<PhraseLine> source,
+        Rect body,
+        EditorPalette palette,
+        Typeface typeface,
+        double pixelsPerDip)
+    {
+        var available = Math.Max(60, body.Width - 48);
+
+        // 字号：按最宽的一行缩放到可用宽度
+        var widest = 1.0;
+        foreach (var line in source)
+        {
+            if (line.Text.Length == 0) continue;
+            widest = Math.Max(widest, LayoutHelper.Measure(line.Text, 64, typeface, pixelsPerDip));
+        }
+
+        var fontSize = Math.Clamp(64 * (available / widest), 14, 64);
+        var lineHeight = fontSize * 1.5;
+        var totalHeight = lineHeight * source.Count;
+        var top = body.Top + Math.Max(12, (body.Height - totalHeight) / 2);
+
+        var texts = new List<FormattedText>(source.Count);
+        var lefts = new double[source.Count];
+        var tops = new double[source.Count];
+        var clips = new RectangleGeometry[source.Count];
+
+        for (var i = 0; i < source.Count; i++)
+        {
+            var line = source[i];
+            var text = LayoutHelper.Create(line.Text, fontSize, palette.Foreground, typeface, pixelsPerDip);
+
+            // 整行只排一次，再按 token 上色：字距、连字交给 WPF 统一处理
+            foreach (var run in line.Runs)
+            {
+                var start = Math.Clamp(run.Start, 0, line.Text.Length);
+                var length = Math.Clamp(run.Length, 0, line.Text.Length - start);
+                if (length > 0) text.SetForegroundBrush(palette.BrushFor(run.Class), start, length);
+            }
+
+            var lineTop = top + i * lineHeight;
+            texts.Add(text);
+            lefts[i] = Math.Max(0, (body.Width - text.WidthIncludingTrailingWhitespace) / 2);
+            tops[i] = lineTop + (lineHeight - text.Height) / 2;
+            clips[i] = new RectangleGeometry(new Rect(2, lineTop, Math.Max(0, body.Width - 4), lineHeight));
+        }
+
+        return new PhraseLayout(
+            source,
+            texts,
+            lefts,
+            tops,
+            clips,
+            fontSize,
+            lineHeight,
+            body.Width,
+            body.Height,
+            widest * fontSize / 64);
+    }
+}
+
+internal static class LayoutHelper
+{
+    public static FormattedText Create(string text, double size, Brush brush, Typeface typeface, double pixelsPerDip) => new(
+        text,
+        CultureInfo.CurrentUICulture,
+        FlowDirection.LeftToRight,
+        typeface,
+        size,
+        brush,
+        pixelsPerDip);
+
+    public static double Measure(string text, double size, Typeface typeface, double pixelsPerDip)
+        => Create(text, size, Brushes.Black, typeface, pixelsPerDip).WidthIncludingTrailingWhitespace;
 }
 
 /// <summary>乐句里的一行：原文 + 该行的语法高亮区间 + 在缓冲区里的绝对起点。</summary>

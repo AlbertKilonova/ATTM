@@ -37,6 +37,7 @@
     <SolidColorBrush x:Key="Brush.Syntax.Value"     Color="#FFFFB86C" />
     <SolidColorBrush x:Key="Brush.Syntax.Note"      Color="#FFE8E8ED" />
     <SolidColorBrush x:Key="Brush.Syntax.Octave"    Color="#FFC792EA" />
+    <SolidColorBrush x:Key="Brush.Syntax.OctaveDown" Color="#FF5FC8D8" />
     <SolidColorBrush x:Key="Brush.Syntax.Sharp"     Color="#FFFF7B72" />
     <SolidColorBrush x:Key="Brush.Syntax.Punctuation" Color="#FF5D6373" />
     <SolidColorBrush x:Key="Brush.Syntax.Rest"      Color="#FF565B6B" />
