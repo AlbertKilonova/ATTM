@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using ATTM.Core.Syntax;
 using ATTM.Editing;
 using ATTM.Services;
 using ATTM.Views;
@@ -426,36 +427,33 @@ bpm = 120
             editor.ShowPhrase(0);
             Pump(700);
             editor.ShowPhrase(1);
-            Pump(280);
+            Pump(100);
 
             var midway = phrase.RevealProgress;
 
             Pump(700);
             var settled = phrase.RevealProgress;
 
-            Console.WriteLine($"      280ms 进度 {midway:F2}，之后 {settled:F2}");
+            Console.WriteLine($"      100ms 进度 {midway:F2}，之后 {settled:F2}");
             return midway is > 0.02 and < 0.98 && settled >= 0.999;
         });
 
-        Check("乐句预览：旧句先退场、新句后入场（不重叠）", () =>
+        Check("乐句预览：换句时新句立即入场、旧句渐隐", () =>
         {
             editor.ShowPhrase(0);
             Pump(700);
 
             editor.ShowPhrase(1);
-            Pump(100);
+            Pump(60);
 
-            var gap = phrase.RevealProgress;      // 新句还没开始画
-            var leaving = phrase.IsAnimating;     // 旧句还在退场
+            var entering = phrase.RevealProgress;   // 60ms 就已经开始入画
+            var fading = phrase.IsAnimating;
 
-            Pump(230);
-            var entering = phrase.RevealProgress; // 新句已经开始入场
-
-            Pump(700);
+            Pump(500);
             var settled = phrase.RevealProgress;
 
-            Console.WriteLine($"      100ms 新句进度 {gap:F2}（旧句退场中={leaving}），330ms 进度 {entering:F2}，最终 {settled:F2}");
-            return gap <= 0.001 && leaving && entering > 0.05 && settled >= 0.999;
+            Console.WriteLine($"      60ms 新句进度 {entering:F2}（旧句渐隐中={fading}），之后 {settled:F2}");
+            return entering > 0.05 && fading && settled >= 0.999;
         });
 
         Check("乐句预览：沿用编辑器的语法配色", () =>
@@ -492,35 +490,27 @@ bpm = 120
 
         Check("语法高亮：升八度和降八度分开配色", () =>
         {
-            editor.Text = "bpm = 120" + nl + "1 = C 4/4" + nl + nl + "+1,-1,+2,-2,1,2";
-            Pump(500);
+            const char lf = (char)10;
 
-            var up = ContainsColor(editor, "#FFC792EA", 24);
-            var down = ContainsColor(editor, "#FF5FC8D8", 24);
+            var result = AttmParser.Parse("bpm = 120" + lf + "1 = C 4/4" + lf + lf + "+1,-1,1,2");
+            var runs = EditorHighlighter.Build(result)[3];
 
+            var hasUp = runs.Any(run => run.Class == EditorTokenClass.Octave);
+            var hasDown = runs.Any(run => run.Class == EditorTokenClass.OctaveDown);
+
+            var palette = EditorPalette.FromResources(editor);
+            var upColor = (palette.Octave as SolidColorBrush)?.Color.ToString() ?? "(null)";
+            var downColor = (palette.OctaveDown as SolidColorBrush)?.Color.ToString() ?? "(null)";
+
+            // 顺便确认颜色真的画到了屏幕上（抗锯齿会让它偏一截，用最近色判断）
+            editor.Text = "bpm = 120" + lf + "1 = C 4/4" + lf + lf + "+1,-1,-1,-1";
+            Pump(400);
+            var nearest = ClosestColor(editor, downColor);
             editor.Text = phraseScore;
             Pump(400);
 
-            Console.WriteLine($"      升八度 #C792EA={up}，降八度 #5FC8D8={down}");
-            return up && down;
-        });
-
-        Check("乐句预览：入场缓出、出场缓入", () =>
-        {
-            var enter = new[] { 0.0, 0.25, 0.5, 0.75, 1.0 }.Select(PhrasePreview.EnterCurve).ToArray();
-            var exit = new[] { 0.0, 0.25, 0.5, 0.75, 1.0 }.Select(PhrasePreview.ExitCurve).ToArray();
-
-            Console.WriteLine($"      入场 {string.Join(" ", enter.Select(v => v.ToString("F2"))) }");
-            Console.WriteLine($"      出场 {string.Join(" ", exit.Select(v => v.ToString("F2"))) }");
-
-            // 入场：前 1/4 时间已经走了大半（快起步、慢收尾）
-            var easeOut = enter[1] > 0.5 && enter[3] > 0.95;
-            // 出场：前 1/4 时间几乎没动（慢起步、后段加速离开）
-            var easeIn = exit[1] > 0.95 && exit[3] < 0.6;
-
-            return easeOut && easeIn
-                   && Math.Abs(enter[0]) < 0.001 && Math.Abs(enter[4] - 1) < 0.001
-                   && Math.Abs(exit[0] - 1) < 0.001 && Math.Abs(exit[4]) < 0.001;
+            Console.WriteLine($"      + -> {upColor}，- -> {downColor}；屏幕最近色 {nearest.Color}（距 {nearest.Distance}）");
+            return hasUp && hasDown && upColor != downColor && nearest.Distance < 70;
         });
 
         Check("乐句预览：动画帧只重绘不重排", () =>

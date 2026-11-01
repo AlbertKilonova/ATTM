@@ -22,19 +22,16 @@ public sealed class PhrasePreview : FrameworkElement
     private const double MaxFontSize = 64;
     private const double MinFontSize = 14;
 
-    // 入场：缓出（起步快、收尾稳）；出场：缓入（起步慢、后段加速离开）
-    // 时长都压得比较短，让大字紧跟小节边界：换句后约 0.1 秒旧句退完、新句开始入画。
-    private const double InDurationMs = 280;
-    private const double OutDurationMs = 110;
+    // 入场：滑入 + 淡入（缓出曲线，起步快、收尾稳）
+    // 出场：只做渐隐，不位移，也不等待——新旧两段直接叠着交替，换句瞬间就有新内容。
+    private const double InDurationMs = 240;
+    private const double OutDurationMs = 90;
 
-    /// <summary>旧句退完到新句入场之间的空隙，避免两段文字在屏幕上重叠。</summary>
-    private const double InDelayMs = 125;
+    /// <summary>出场起点透明度上限：旧的立刻压暗，新的读起来更清楚。</summary>
+    private const double OutAlphaCap = 0.5;
 
-    /// <summary>快节奏换句时的空隙（上一句还没入场完就换句）。</summary>
-    private const double RushDelayMs = 45;
-
+    private const double InDelayMs = 0;
     private const double LineStaggerMs = 60;
-    private const double OutStaggerMs = 15;
     private const double SlideDistance = 40;   // 位移短一点，文字更快进入可读位置
 
     private readonly List<PhraseLine> _current = new();
@@ -134,9 +131,6 @@ public sealed class PhrasePreview : FrameworkElement
     {
         if (measureIndex == MeasureIndex && SameLines(lines)) return;
 
-        // 上一句还没入场完就又换句（快节奏）：缩短退场与空隙，别让屏幕一直空着
-        var rush = _current.Count > 0 && RevealProgress < 1;
-
         if (_current.Count > 0)
             _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), _layout, AlphaOfCurrent(), Now());
 
@@ -149,8 +143,8 @@ public sealed class PhrasePreview : FrameworkElement
         MeasureIndex = measureIndex;
         MeasureCount = measureCount;
 
-        // 先让旧句退场，过一小段空隙再入场（这段时间新句进度为 0，不会被画出来）
-        _inStartedAt = (long)(Now() + (rush ? RushDelayMs : InDelayMs));
+        // 新旧直接叠着交替：新句立刻开始入场，旧句在它下面渐隐
+        _inStartedAt = (long)(Now() + InDelayMs);
 
         StartFrames();
         InvalidateVisual();
@@ -241,18 +235,14 @@ public sealed class PhrasePreview : FrameworkElement
         return 1 - Math.Pow(1 - clamped, 3);
     }
 
-    /// <summary>出场曲线：缓入（1-t^3），起步慢、后段加速离开。</summary>
-    public static double ExitCurve(double t)
-    {
-        var clamped = Math.Clamp(t, 0.0, 1.0);
-        return 1 - clamped * clamped * clamped;
-    }
+    /// <summary>出场曲线：线性淡出（纯渐隐，不做位移与缓动）。</summary>
+    public static double ExitCurve(double t) => 1 - Math.Clamp(t, 0.0, 1.0);
 
     private static double EnterProgress(int index, double elapsedMs)
         => EnterCurve((elapsedMs - index * LineStaggerMs) / InDurationMs);
 
-    private static double ExitProgress(int index, double elapsedMs)
-        => ExitCurve((elapsedMs - index * OutStaggerMs) / OutDurationMs);
+    private static double ExitProgress(long elapsedMs)
+        => ExitCurve(elapsedMs / OutDurationMs);
 
     private double AlphaOfCurrent()
     {
@@ -398,10 +388,10 @@ public sealed class PhrasePreview : FrameworkElement
         {
             var outgoing = _outgoing;
             var elapsed = Now() - outgoing.StartedAt;
-            var lastVisible = ExitProgress(outgoing.Lines.Count - 1, elapsed);
+            var lastVisible = ExitProgress(elapsed);
 
             if (lastVisible <= 0.002) _outgoing = null;
-            else DrawPhrase(dc, outgoing.Lines, outgoing.Layout, outgoing.StartedAt, outgoing.StartAlpha, true);
+            else DrawPhrase(dc, outgoing.Lines, outgoing.Layout, outgoing.StartedAt, Math.Min(outgoing.StartAlpha, OutAlphaCap), true);
         }
 
         if (_current.Count == 0)
@@ -476,12 +466,12 @@ public sealed class PhrasePreview : FrameworkElement
 
         for (var i = 0; i < lines.Count && i < layout.Lines.Count; i++)
         {
-            var progress = leaving ? ExitProgress(i, now - startedAt) : EnterProgress(i, now - startedAt);
+            var progress = leaving ? ExitProgress(now - startedAt) : EnterProgress(i, now - startedAt);
             if (progress <= 0.002) continue;
 
-            // 偶数行从左滑入，奇数行从右滑入；出场沿原路滑回去
+            // 偶数行从左滑入，奇数行从右滑入；出场只淡出，不位移
             var direction = i % 2 == 0 ? -1.0 : 1.0;
-            var dx = direction * SlideDistance * (1 - progress);
+            var dx = leaving ? 0 : direction * SlideDistance * (1 - progress);
             var alpha = batchAlpha * (leaving ? progress : Math.Clamp(progress * 1.4, 0, 1));
 
             dc.PushOpacity(Math.Clamp(alpha, 0, 1));
