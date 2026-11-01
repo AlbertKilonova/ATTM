@@ -73,6 +73,9 @@ public sealed class PhrasePreview : FrameworkElement
 
     public bool HasContent => _current.Count > 0;
 
+    /// <summary>是否正在显示"播放时在这里显示当前乐句"的空状态提示。</summary>
+    public bool IsShowingIdleHint => MeasureIndex < 0 && _current.Count == 0 && _outgoing is null;
+
     /// <summary>当前正在发声的音（相对每个乐句行的列区间）。</summary>
     public IReadOnlyList<ActiveRange> ActiveRanges => _active;
 
@@ -150,10 +153,20 @@ public sealed class PhrasePreview : FrameworkElement
         InvalidateVisual();
     }
 
-    /// <summary>淡出并清空（停止播放或谱面变化时调用）。</summary>
-    public void Hide()
+    /// <summary>
+    /// 淡出并清空。
+    /// </summary>
+    /// <param name="keepMeasure">
+    /// true = 只是本小节提前退场，保留小节号（这样顶部的"第 N / M 小节"不会闪，
+    /// 也不会露出"播放时在这里显示当前乐句"的提示）。
+    /// </param>
+    public void Hide(bool keepMeasure = false)
     {
-        if (_current.Count == 0 && _outgoing is null) return;
+        if (_current.Count == 0 && _outgoing is null)
+        {
+            if (!keepMeasure) MeasureIndex = -1;
+            return;
+        }
 
         if (_current.Count > 0)
             _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), _layout, AlphaOfCurrent(), Now());
@@ -163,7 +176,7 @@ public sealed class PhrasePreview : FrameworkElement
         _marks.Clear();
         _layout = null;
         _contentRevision++;
-        MeasureIndex = -1;
+        if (!keepMeasure) MeasureIndex = -1;
 
         StartFrames();
         InvalidateVisual();
@@ -396,7 +409,8 @@ public sealed class PhrasePreview : FrameworkElement
 
         if (_current.Count == 0)
         {
-            if (_outgoing is null) DrawEmptyHint(dc, body);
+            // 播放中小节之间会有空场，这时候不要露出空状态提示（会闪一下）
+            if (IsShowingIdleHint) DrawEmptyHint(dc, body);
             return;
         }
 

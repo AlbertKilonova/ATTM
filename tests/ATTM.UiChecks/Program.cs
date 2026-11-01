@@ -460,7 +460,9 @@ bpm = 120
         {
             // bpm 480 -> 一小节 0.5 秒，提前退场 160ms 很容易采样到
             editor.Text = "bpm = 480" + nl + "1 = C 4/4" + nl + nl
-                + "1,2,3,4" + nl + nl + "5,6,7,+1" + nl + nl + "1,1,1,1";
+                + "1,2,3,4" + nl + nl + "5,6,7,+1" + nl + nl
+                + "1,1,1,1" + nl + nl + "2,2,2,2" + nl + nl
+                + "3,3,3,3" + nl + nl + "4,4,4,4" + nl + nl + "5,5,5,5";
             Pump(500);
 
             var play = (Button)window.FindName("PlayPauseButton")!;
@@ -470,11 +472,23 @@ bpm = 120
 
             var sawContent = false;
             var sawEmpty = false;
-            for (var i = 0; i < 70; i++)
+            var hintFlashed = false;
+            var counterFlashed = false;
+
+            for (var i = 0; i < 60; i++)
             {
                 Pump(20);
+
+                // 播放结束后不再采样（Finished 会正常清空，不算"提前空场"）
+                if (!PlaybackTextOf(window).Contains("播放中")) break;
+
                 if (phrase.HasContent) sawContent = true;
-                else if (sawContent) sawEmpty = true;
+                else if (sawContent)
+                {
+                    sawEmpty = true;
+                    if (phrase.IsShowingIdleHint) hintFlashed = true;
+                    if (phrase.MeasureIndex < 0) counterFlashed = true;
+                }
             }
 
             stop.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -483,8 +497,9 @@ bpm = 120
             editor.Text = phraseScore;
             Pump(400);
 
-            Console.WriteLine($"      播放中见过内容={sawContent}，见过提前空场={sawEmpty}");
-            return sawContent && sawEmpty;
+            Console.WriteLine($"      播放中见过内容={sawContent}，提前空场={sawEmpty}，"
+                              + $"空场时露提示={hintFlashed}，计数丢失={counterFlashed}");
+            return sawContent && sawEmpty && !hintFlashed && !counterFlashed;
         });
 
         Check("乐句预览：沿用编辑器的语法配色", () =>
