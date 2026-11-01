@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -15,17 +16,29 @@ namespace ATTM;
 public partial class MainWindow : Window
 {
     private const string NewDocumentTemplate = """
-# ATTM 新建文档
+# ATTM 新建文档 - 示例: 小星星
 # 数字 1-7 是音符，0 是休止，逗号分段，空行分隔小节
 # 播放会发送 MIDI 到设置里选择的输出设备
 
-bpm = 120
-1 = C 4/4
-Vel = 90 +-0
+bpm = 120 # 歌曲速度
+1 = C 4/4 # 这是调式和拍号, 可以改, 如 1 = #F 3/4
+Vel = 90 +-0 # 力度90, 随机 +-0
 
-1,2,3,4
++1,+1,+5,+5
+(135)
+# 可以用括号同时弹多个音 
 
-3,02,2,0
+$ 6,6,5,0 # 在前面用 $ 相当于给每个音符一个 + 号
+% (6+1+3),(6+1+3)-6 # 在前面用 % 相当于给每个音符一个 - 号
+
++4,+4,+3,+3
+(-4-61)
+
++2+2+10
+(-5-72 ),(-5-72 )-5
+
+$ legato(10223050) # legato() 表示连奏
+15+1000+30
 """;
 
     private readonly DispatcherTimer _parseTimer = new()
@@ -340,6 +353,11 @@ Vel = 90 +-0
         return remaining > 0 && remaining <= PhraseFadeLeadSeconds;
     }
 
+    private void FileStatusText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(_filePath)) RevealInExplorer(_filePath);
+    }
+
     private void PhraseButton_Click(object sender, RoutedEventArgs e)
     {
         var visible = PhraseButton.IsChecked == true;
@@ -359,8 +377,11 @@ Vel = 90 +-0
         var score = _parse?.Score;
         var errors = _parse?.ErrorCount ?? 0;
 
-        FileStatusText.Text = _fileName;
-        FileStatusText.ToolTip = _filePath ?? "尚未保存到文件";
+        FileStatusText.Text = _filePath ?? _fileName;
+        FileStatusText.ToolTip = string.IsNullOrEmpty(_filePath)
+            ? "尚未保存到文件（Ctrl+S 保存）"
+            : $"点击在资源管理器中显示 - {_filePath}";
+        FileStatusText.Cursor = string.IsNullOrEmpty(_filePath) ? null : Cursors.Hand;
         DirtyStatusText.Text = _isDirty ? " · 未保存" : " · 已保存";
         Title = $"ATTM — {_fileName}{(_isDirty ? " *" : string.Empty)}";
 
@@ -481,19 +502,44 @@ Vel = 90 +-0
         Editor.FocusEditor();
     }
 
-    private void OpenDocument()
+    /// <summary>打开谱库文件夹（音乐\ATTM），在里面双击 .attm 就会用本程序打开。</summary>
+    private void OpenLibraryFolder()
     {
-        if (!ConfirmDiscard()) return;
+        var folder = AppConfig.ResolveSaveFolder(_config);
 
-        var dialog = new OpenFileDialog
+        try
         {
-            Title = "打开谱面",
-            Filter = "ATTM 谱面 (*.attm;*.txt)|*.attm;*.txt|所有文件 (*.*)|*.*",
-            CheckFileExists = true
-        };
+            Directory.CreateDirectory(folder);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"打不开谱库文件夹：{ex.Message}", "ATTM",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
-        if (dialog.ShowDialog(this) == true)
-            LoadFile(dialog.FileName);
+    /// <summary>在资源管理器里定位到某个文件；文件不存在就打开它所在的目录。</summary>
+    private void RevealInExplorer(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+                return;
+            }
+
+            var folder = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(folder)) return;
+
+            Directory.CreateDirectory(folder);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            // 资源管理器打不开就算了，不打扰用户
+        }
     }
 
     private bool LoadFile(string path)
@@ -606,7 +652,7 @@ Vel = 90 +-0
 
         if (control && e.Key == Key.O)
         {
-            OpenDocument();
+            OpenLibraryFolder();
             e.Handled = true;
             return;
         }
@@ -724,9 +770,10 @@ Vel = 90 +-0
 
     private void NewButton_Click(object sender, RoutedEventArgs e) => NewDocument();
 
-    private void OpenButton_Click(object sender, RoutedEventArgs e) => OpenDocument();
+    private void OpenButton_Click(object sender, RoutedEventArgs e) => OpenLibraryFolder();
 
-    private void SaveButton_Click(object sender, RoutedEventArgs e) => SaveDocument(forceDialog: false);
+    // 工具栏的保存键始终要求重新选位置；Ctrl+S 才在保存过一次后直接覆盖保存
+    private void SaveButton_Click(object sender, RoutedEventArgs e) => SaveDocument(forceDialog: true);
 
     private void UndoButton_Click(object sender, RoutedEventArgs e) => Editor.Undo();
 

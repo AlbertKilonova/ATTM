@@ -40,6 +40,7 @@ public sealed class EditorPalette
         EditorTokenClass.Punctuation => Punctuation,
         EditorTokenClass.Comment => Comment,
         EditorTokenClass.Directive => Directive,
+        EditorTokenClass.Keyword => Directive,
         EditorTokenClass.Value => Value,
         _ => Error
     };

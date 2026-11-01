@@ -12,6 +12,7 @@ public enum EditorTokenClass
     Punctuation,
     Comment,
     Directive,
+    Keyword,
     Value,
     Unknown
 }
@@ -79,11 +80,17 @@ public static class EditorHighlighter
         return token.Kind switch
         {
             TokenKind.Comment => EditorTokenClass.Comment,
-            TokenKind.Identifier => directiveLine ? EditorTokenClass.Directive : EditorTokenClass.Unknown,
+            TokenKind.Identifier => directiveLine
+                ? EditorTokenClass.Directive
+                : token.Text.Equals("legato", StringComparison.OrdinalIgnoreCase)
+                    ? EditorTokenClass.Keyword
+                    : EditorTokenClass.Unknown,
             TokenKind.Number => directiveLine
                 ? EditorTokenClass.Value
                 : token.Text == "0" ? EditorTokenClass.Rest : EditorTokenClass.Note,
             TokenKind.Dot => EditorTokenClass.Value,
+            TokenKind.LineOctaveUp => EditorTokenClass.Octave,
+            TokenKind.LineOctaveDown => EditorTokenClass.OctaveDown,
             TokenKind.Plus => EditorTokenClass.Octave,
             TokenKind.Minus => EditorTokenClass.OctaveDown,
             TokenKind.Sharp => EditorTokenClass.Sharp,

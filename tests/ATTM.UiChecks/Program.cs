@@ -82,17 +82,41 @@ internal static class Program
 
         Check("编辑器初始模板可解析", () => InfoTextOf(window).Contains("音符"), InfoTextOf(window));
 
+        Check("新建文档默认载入《小星星》示例", () =>
+        {
+            var root = FindRepoRoot();
+            var sample = root is null ? null : Path.Combine(root, "samples", "小星星 - 演示谱.attm");
+            if (sample is null || !File.Exists(sample)) return false;
+
+            static string Normalize(string text) => text.Replace("\r\n", "\n").TrimEnd('\n');
+
+            var expected = Normalize(File.ReadAllText(sample, Encoding.UTF8));
+            var actual = Normalize(editor.Text);
+
+            Console.WriteLine($"      模板 {actual.Length} 字符 / 示例 {expected.Length} 字符，一致={actual == expected}");
+            return actual == expected;
+        });
+
         editor.SetCaret(editor.Text.Length);
         Pump(80);
         var beforeLength = editor.Text.Length;
+        var beforeNotes = ParseNoteCount(InfoTextOf(window));
         editor.InsertText("\n\n+1,+2,+3,+4");
         Pump(450);
 
         Check("输入后文本长度增加", () => editor.Text.Length == beforeLength + 13,
             $"{beforeLength} -> {editor.Text.Length}");
 
-        Check("输入后解析出新小节（音符数增加）", () => InfoTextOf(window).Contains("11 音符"),
-            InfoTextOf(window));
+        Check("输入后解析出新小节（音符数增加）", () =>
+        {
+            var info = InfoTextOf(window);
+            var match = System.Text.RegularExpressions.Regex.Match(info, @"(\d+) 音符");
+            var now = match.Success ? int.Parse(match.Groups[1].Value) : -1;
+            var added = now - beforeNotes;
+
+            Console.WriteLine($"      音符 {beforeNotes} -> {now}（+{added}）");
+            return added == 4;
+        });
 
         Check("撤销恢复文本", () =>
         {
@@ -337,17 +361,20 @@ bpm = 120
             other.Show();
             Pump(600);
 
-            var fileLabel = (other.FindName("FileStatusText") as TextBlock)?.Text ?? string.Empty;
+            var fileLabel = (other.FindName("FileStatusText") as TextBlock);
             var info = (other.FindName("InfoText") as TextBlock)?.Text ?? string.Empty;
             var title = other.Title;
+            var labelText = fileLabel?.Text ?? string.Empty;
+            var clickable = fileLabel?.Cursor == System.Windows.Input.Cursors.Hand;
 
             other.Close();
             File.Delete(path);
 
-            Console.WriteLine($"      标题={title} 文件名={fileLabel} 信息={info}");
+            Console.WriteLine($"      标题={title} 路径={labelText} 可点击={clickable}");
 
             return title.Contains("attm-open-test.attm", StringComparison.Ordinal)
-                   && fileLabel == "attm-open-test.attm"
+                   && labelText == path
+                   && clickable
                    && info.Contains("3/4");
         });
 
@@ -862,6 +889,26 @@ bpm = 120
 
     /// <summary>把一个元素画到位图上，统计文本区里"和背景不同"的像素数（深浅主题通用）。</summary>
     /// <summary>统计元素与背景色的平均亮度差，用来判断"是不是太抢眼"。</summary>
+    /// <summary>从状态栏文本里取音符数。</summary>
+    private static int ParseNoteCount(string info)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(info, @"(\d+) 音符");
+        return match.Success ? int.Parse(match.Groups[1].Value) : -1;
+    }
+
+    /// <summary>向上找仓库根目录（有 ATTM.csproj 的那一层）。</summary>
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "ATTM.csproj"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
     /// <summary>把元素渲染一帧（用于测单帧成本）。</summary>
     private static void RenderOnce(FrameworkElement element)
     {

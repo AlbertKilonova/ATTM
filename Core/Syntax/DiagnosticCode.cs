@@ -27,5 +27,14 @@ public enum DiagnosticCode
     EmptySegment = 114,
     PitchOutOfRange = 115,
     EmptyMeasure = 116,
-    OctaveMarkerWithoutDigit = 117
+    OctaveMarkerWithoutDigit = 117,
+
+    // 行八度前缀 / 连奏
+    LineOctaveNotAtStart = 118,
+    LineOctaveMixed = 119,
+    LineOctaveWithoutSpace = 120,
+    LegatoSyntax = 121,
+    LegatoEmpty = 122,
+    LegatoRest = 123,
+    LegatoNested = 124
 }

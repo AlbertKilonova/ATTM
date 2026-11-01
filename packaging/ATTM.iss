@@ -59,6 +59,13 @@ Name: "associate"; Description: "关联 .attm 谱面文件"; GroupDescription: "
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; 示例谱子与语法教程：装到 音乐\ATTM（已存在就不覆盖，免得冲掉用户的改动）
+; 绿色版不做这一步，解压即用
+Source: "{#SourceDir}\samples\欢乐颂 - 演示谱.attm"; DestDir: "{code:GetMusicFolder}\ATTM"; Flags: onlyifdoesntexist uninsneveruninstall ignoreversion
+Source: "{#SourceDir}\samples\小星星 - 演示谱.attm"; DestDir: "{code:GetMusicFolder}\ATTM"; Flags: onlyifdoesntexist uninsneveruninstall ignoreversion
+Source: "{#SourceDir}\samples\Affix Your Name! - Anming_cat.attm"; DestDir: "{code:GetMusicFolder}\ATTM"; Flags: onlyifdoesntexist uninsneveruninstall ignoreversion
+Source: "{#SourceDir}\ATTM 语法教程.md"; DestDir: "{code:GetMusicFolder}\ATTM"; Flags: onlyifdoesntexist uninsneveruninstall ignoreversion
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\ATTM 谱面示例"; Filename: "{app}\samples"
@@ -83,6 +90,19 @@ Root: HKA; Subkey: "Software\Classes\ATTM.Score\DefaultIcon"; ValueType: string;
 Root: HKA; Subkey: "Software\Classes\ATTM.Score\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""; Tasks: associate
 
 [Code]
+// 音乐文件夹：优先用系统登记的路径（用户可能把它重定向到别的盘）
+function GetMusicFolder(Param: String): String;
+var
+  Value: String;
+begin
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders', 'My Music', Value) then
+    Result := Value
+  else if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders', 'My Music', Value) then
+    Result := Value
+  else
+    Result := GetEnv('USERPROFILE') + '\Music';
+end;
+
 // 机器上有没有 .NET 10 桌面运行时（10.x 的 Microsoft.WindowsDesktop.App）
 function NeedsDotNet(): Boolean;
 var

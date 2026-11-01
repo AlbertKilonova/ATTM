@@ -19,7 +19,7 @@ internal sealed class Parser
     private readonly List<List<Token>> _lines = new();
     private readonly List<Diagnostic> _diagnostics = new();
     private readonly List<NoteEvent> _notes = new();
-    private readonly List<List<Token>> _group = new();
+    private readonly List<VoiceLine> _group = new();
     private readonly List<int> _measureStartLines = new();
 
     private double? _bpm;
@@ -104,9 +104,12 @@ internal sealed class Parser
                 continue;
             }
 
+            var (body, shift) = ReadLinePrefix(line, meaningful);
+            if (body.Count == 0) continue;
+
             _contentStarted = true;
             if (_group.Count == 0) _groupStartLine = lineIndex;
-            _group.Add(meaningful);
+            _group.Add(new VoiceLine(body, shift));
         }
 
         FlushGroup();
@@ -443,8 +446,70 @@ internal sealed class Parser
         _measureIndex++;
     }
 
-    private void ParseVoiceLine(List<Token> tokens, int measureTicks, int voiceIndex)
+    /// <summary>
+    /// 剥掉行首的 $ / % 前缀：每个 $ 整行升一个八度，每个 % 降一个八度，只影响这一行。
+    /// </summary>
+    private (List<Token> Tokens, int Shift) ReadLinePrefix(List<Token> rawLine, List<Token> meaningful)
     {
+        var ups = 0;
+        var downs = 0;
+        var index = 0;
+
+        while (index < meaningful.Count
+               && meaningful[index].Kind is TokenKind.LineOctaveUp or TokenKind.LineOctaveDown)
+        {
+            if (meaningful[index].Kind == TokenKind.LineOctaveUp) ups++;
+            else downs++;
+            index++;
+        }
+
+        // 前缀只允许出现在行首
+        for (var i = index; i < meaningful.Count; i++)
+        {
+            if (meaningful[i].Kind is TokenKind.LineOctaveUp or TokenKind.LineOctaveDown)
+            {
+                AddDiagnostic(DiagnosticCode.LineOctaveNotAtStart, meaningful[i], meaningful[i].Span,
+                    "八度前缀 $ / % 只能写在行首，例如 \"$ 1,2,3,4\"");
+                break;
+            }
+        }
+
+        if (index == 0) return (meaningful, 0);
+
+        var rest = meaningful.GetRange(index, meaningful.Count - index);
+
+        if (ups > 0 && downs > 0)
+        {
+            AddDiagnostic(DiagnosticCode.LineOctaveMixed, meaningful[0], SpanOf(meaningful),
+                "八度前缀不能混用 $ 和 %");
+            return (rest, 0);
+        }
+
+        // 前缀后面必须跟空格
+        var lastPrefix = meaningful[index - 1];
+        var hasSpace = false;
+        for (var i = 0; i < rawLine.Count; i++)
+        {
+            if (rawLine[i].Span.Start != lastPrefix.Span.Start) continue;
+
+            hasSpace = i + 1 < rawLine.Count && rawLine[i + 1].Kind == TokenKind.Whitespace;
+            break;
+        }
+
+        if (!hasSpace)
+        {
+            AddDiagnostic(DiagnosticCode.LineOctaveWithoutSpace, lastPrefix, lastPrefix.Span,
+                "八度前缀 $ / % 后面必须跟一个空格，例如 \"$ 1,2,3,4\"");
+        }
+
+        return (rest, ups - downs);
+    }
+
+    private void ParseVoiceLine(VoiceLine voiceLine, int measureTicks, int voiceIndex)
+    {
+        var tokens = voiceLine.Tokens;
+        var lineShift = voiceLine.OctaveShift;
+
         // 按逗号切段（保留逗号 token 以便报错定位）
         var segments = new List<(List<Token> Tokens, Token At)>();
         var start = 0;
@@ -483,7 +548,7 @@ internal sealed class Parser
         var parsedSegments = new List<List<Unit>>(segmentCount);
         foreach (var (segmentTokens, _) in segments)
         {
-            var units = ParseSegment(segmentTokens);
+            var units = ParseSegment(segmentTokens, lineShift);
             if (units.Count == 0) return;
 
             if ((units.Count & (units.Count - 1)) != 0)
@@ -498,7 +563,7 @@ internal sealed class Parser
 
         // 计算每个单元在行内的小节偏移
         var segmentTicks = measureTicks / segmentCount;
-        var flat = new List<(long Start, Unit Unit)>();
+        var flat = new List<(long Start, long SegmentEnd, Unit Unit)>();
 
         for (var s = 0; s < parsedSegments.Count; s++)
         {
@@ -517,7 +582,8 @@ internal sealed class Parser
                     return;
                 }
 
-                flat.Add((unitStart, units[u]));
+                var segmentEnd = (long)Math.Round((double)measureTicks * (s + 1) / segmentCount);
+                flat.Add((unitStart, segmentEnd, units[u]));
             }
         }
 
@@ -525,11 +591,42 @@ internal sealed class Parser
 
         for (var i = 0; i < flat.Count; i++)
         {
-            var (unitStart, unit) = flat[i];
-            var end = i + 1 < flat.Count ? flat[i + 1].Start : measureTicks;
-            var duration = end - unitStart;
+            var (unitStart, segmentEnd, unit) = flat[i];
+            var nextStart = i + 1 < flat.Count ? flat[i + 1].Start : measureTicks;
+            var unitTicks = Math.Max(1, nextStart - unitStart);
 
-            if (duration <= 0 || unit.IsRest) continue;
+            if (unit.IsRest) continue;
+
+            // 连奏：组内音符依次开始，但每个音的时值都撑到本段末尾才断开
+            if (unit.IsLegato && unit.Notes.Count > 0)
+            {
+                for (var n = 0; n < unit.Notes.Count; n++)
+                {
+                    var noteStart = unitStart + (long)Math.Round((double)unitTicks * n / unit.Notes.Count);
+                    if (noteStart >= measureTicks) break;
+
+                    // 组内的 0 不发声，只占掉自己的那一份时间
+                    if (unit.Notes[n].IsRest) continue;
+
+                    var noteEnd = Math.Min(Math.Max(noteStart + 1, segmentEnd), measureTicks);
+                    if (noteEnd <= noteStart) continue;
+
+                    _notes.Add(new NoteEvent(
+                        unit.Notes[n].Pitch,
+                        _velocityBase,
+                        measureOffset + noteStart,
+                        noteEnd - noteStart,
+                        _measureIndex,
+                        voiceIndex,
+                        unit.Span));
+                }
+
+                continue;
+            }
+
+            var duration = nextStart - unitStart;
+
+            if (duration <= 0) continue;
 
             foreach (var note in unit.Notes)
             {
@@ -547,7 +644,7 @@ internal sealed class Parser
 
     // ---------------------------------------------------------------- 音符
 
-    private List<Unit> ParseSegment(List<Token> tokens)
+    private List<Unit> ParseSegment(List<Token> tokens, int lineShift)
     {
         var units = new List<Unit>();
         var i = 0;
@@ -555,6 +652,13 @@ internal sealed class Parser
         while (i < tokens.Count)
         {
             var token = tokens[i];
+
+            if (token.Kind == TokenKind.Identifier
+                && token.Text.Equals("legato", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseLegato(tokens, ref i, lineShift, units)) return units;
+                continue;
+            }
 
             if (token.Kind == TokenKind.LParen)
             {
@@ -587,7 +691,7 @@ internal sealed class Parser
                 var k = 0;
                 while (k < inner.Count)
                 {
-                    if (!TryParseNote(inner, ref k, out var note)) continue;
+                    if (!TryParseNote(inner, ref k, lineShift, out var note)) continue;
 
                     if (note.IsRest)
                     {
@@ -604,7 +708,7 @@ internal sealed class Parser
             }
             else
             {
-                if (!TryParseNote(tokens, ref i, out var note)) continue;
+                if (!TryParseNote(tokens, ref i, lineShift, out var note)) continue;
 
                 units.Add(note.IsRest
                     ? new Unit(Array.Empty<NoteInfo>(), note.Span, true)
@@ -615,11 +719,89 @@ internal sealed class Parser
         return units;
     }
 
-    private bool TryParseNote(List<Token> tokens, ref int i, out NoteInfo note)
+    /// <summary>解析 legato(...)：一组依次演奏、时值都撑到本段末尾的音符。</summary>
+    private bool TryParseLegato(List<Token> tokens, ref int i, int lineShift, List<Unit> units)
+    {
+        var keyword = tokens[i];
+        i++;
+
+        if (i >= tokens.Count || tokens[i].Kind != TokenKind.LParen)
+        {
+            AddDiagnostic(DiagnosticCode.LegatoSyntax, keyword, keyword.Span,
+                "legato 后面必须紧跟括号，例如 \"legato(1234)\"");
+            return true;
+        }
+
+        var open = tokens[i];
+        var close = -1;
+
+        for (var j = i + 1; j < tokens.Count; j++)
+        {
+            if (tokens[j].Kind == TokenKind.RParen) { close = j; break; }
+            if (tokens[j].Kind == TokenKind.LParen) break;
+        }
+
+        if (close < 0)
+        {
+            AddDiagnostic(DiagnosticCode.UnclosedParenthesis, open,
+                SourceSpan.FromBounds(keyword.Span.Start, tokens[^1].Span.End),
+                "legato 括号没有闭合");
+            return false;
+        }
+
+        var span = SourceSpan.FromBounds(keyword.Span.Start, tokens[close].Span.End);
+        var inner = tokens.GetRange(i + 1, close - i - 1);
+        i = close + 1;
+
+        if (inner.Count == 0)
+        {
+            AddDiagnostic(DiagnosticCode.LegatoEmpty, open, span, "legato 括号内不能为空");
+            return true;
+        }
+
+        var notes = new List<NoteInfo>();
+        var k = 0;
+
+        while (k < inner.Count)
+        {
+            if (inner[k].Kind == TokenKind.LParen)
+            {
+                AddDiagnostic(DiagnosticCode.LegatoNested, inner[k], inner[k].Span,
+                    "legato 括号内不能再用和弦括号（连奏是依次演奏，不是同时）");
+                k++;
+                continue;
+            }
+
+            if (inner[k].Kind == TokenKind.Comma)
+            {
+                AddDiagnostic(DiagnosticCode.LegatoNested, inner[k], inner[k].Span,
+                    "legato 括号内不能用逗号，音符直接连着写，例如 legato(1234)");
+                k++;
+                continue;
+            }
+
+            if (!TryParseNote(inner, ref k, lineShift, out var note)) continue;
+
+            // 休止符也算一个"拍位"：不发声，但占掉这一份时间
+            notes.Add(note);
+        }
+
+        if ((notes.Count & (notes.Count - 1)) != 0)
+        {
+            AddDiagnostic(DiagnosticCode.UnitCountNotPowerOfTwo, open, span,
+                "legato 里的音符个数（含休止符）必须是 1、2、4、8……");
+            return true;
+        }
+
+        units.Add(new Unit(notes, span, false, true));
+        return true;
+    }
+
+    private bool TryParseNote(List<Token> tokens, ref int i, int lineShift, out NoteInfo note)
     {
         note = default;
         var start = i;
-        var octave = 0;
+        var octave = lineShift;
         var direction = 0;
 
         // + 可以叠加：++1 高两个八度，+++#1 高三个八度的 #1；- 同理
@@ -772,5 +954,11 @@ internal sealed class Parser
 
     private readonly record struct NoteInfo(int Pitch, SourceSpan Span, bool IsRest = false);
 
-    private readonly record struct Unit(IReadOnlyList<NoteInfo> Notes, SourceSpan Span, bool IsRest = false);
+    private readonly record struct Unit(
+        IReadOnlyList<NoteInfo> Notes,
+        SourceSpan Span,
+        bool IsRest = false,
+        bool IsLegato = false);
+
+    private readonly record struct VoiceLine(List<Token> Tokens, int OctaveShift);
 }

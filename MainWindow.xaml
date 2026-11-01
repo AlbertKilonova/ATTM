@@ -63,9 +63,9 @@
                     <Button x:Name="NewButton" Style="{StaticResource IconButton}"
                             Content="&#xE89C;" ToolTip="新建 (Ctrl+N)" Click="NewButton_Click" />
                     <Button x:Name="OpenButton" Style="{StaticResource IconButton}"
-                            Content="&#xE2C8;" ToolTip="打开 (Ctrl+O)" Click="OpenButton_Click" />
+                            Content="&#xE2C8;" ToolTip="打开谱库文件夹（音乐\ATTM，Ctrl+O）" Click="OpenButton_Click" />
                     <Button x:Name="SaveButton" Style="{StaticResource IconButton}"
-                            Content="&#xE161;" ToolTip="保存 (Ctrl+S)，另存为 (Ctrl+Shift+S)"
+                            Content="&#xE161;" ToolTip="另存为（选择保存位置）；Ctrl+S 可在保存过一次后直接保存"
                             Click="SaveButton_Click" />
                 </StackPanel>
 
@@ -94,7 +94,9 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="FileStatusText" Style="{StaticResource StatusText}" Text="未命名.attm" />
+                    <TextBlock x:Name="FileStatusText" Style="{StaticResource StatusText}" Text="未命名.attm"
+                               MaxWidth="460" TextTrimming="CharacterEllipsis"
+                               MouseLeftButtonUp="FileStatusText_MouseLeftButtonUp" />
                     <TextBlock x:Name="DirtyStatusText" Style="{StaticResource StatusText}" Text=" · 已保存" />
                 </StackPanel>
 

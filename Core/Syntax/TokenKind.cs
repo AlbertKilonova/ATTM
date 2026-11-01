@@ -18,5 +18,12 @@ public enum TokenKind
     Slash,
     Equals,
     Identifier,
+
+    /// <summary>行首的 $（整行升八度）。</summary>
+    LineOctaveUp,
+
+    /// <summary>行首的 %（整行降八度）。</summary>
+    LineOctaveDown,
+
     Unknown
 }

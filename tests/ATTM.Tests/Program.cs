@@ -625,6 +625,28 @@ internal static class Program
             return result.CanPlay;
         });
 
+        Check("示例谱子都能解析", () =>
+        {
+            var root = FindRepoRoot();
+            if (root is null) return false;
+
+            var folder = Path.Combine(root, "samples");
+            if (!Directory.Exists(folder)) return false;
+
+            var ok = true;
+            foreach (var file in Directory.GetFiles(folder, "*.attm").OrderBy(f => f))
+            {
+                var result = AttmParser.Parse(File.ReadAllText(file, Encoding.UTF8));
+                if (result.CanPlay) continue;
+
+                ok = false;
+                var first = result.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
+                Console.WriteLine($"      {Path.GetFileName(file)}：{first?.Message}");
+            }
+
+            return ok;
+        });
+
         Check("调式：升号调式 #C / C# 都支持", () =>
         {
             const char lf = (char)10;
@@ -669,6 +691,157 @@ internal static class Program
                    && ok.Score!.Notes[0].Pitch == 72;
         });
 
+        Check("行前缀：$ 整行升八度、% 整行降八度", () =>
+        {
+            const char lf = (char)10;
+
+            var up = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$ 1,2,3,4", "", "1,3,5,7"));
+            var down = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "% 1,2,3,4"));
+
+            if (!up.CanPlay || !down.CanPlay) return false;
+
+            var pitches = up.Score!.Notes.Select(n => n.Pitch).ToArray();
+            var downPitches = down.Score!.Notes.Select(n => n.Pitch).ToArray();
+
+            Console.WriteLine($"      $ {string.Join(",", pitches)}  % {string.Join(",", downPitches)}");
+
+            // 前四个音整体 +12，下一行不受影响
+            return pitches.SequenceEqual(new[] { 72, 74, 76, 77, 60, 64, 67, 71 })
+                   && downPitches.SequenceEqual(new[] { 48, 50, 52, 53 });
+        });
+
+        Check("行前缀：可以叠加，也能作用到和弦", () =>
+        {
+            const char lf = (char)10;
+
+            var twice = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$$ 1,2,3,4"));
+            var chord = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$ (45),(-6-1),1,2"));
+
+            if (!twice.CanPlay || !chord.CanPlay) return false;
+
+            var twicePitches = twice.Score!.Notes.Select(n => n.Pitch).ToArray();
+            var chordPitches = chord.Score!.Notes.Select(n => n.Pitch).ToArray();
+
+            Console.WriteLine($"      $$ {string.Join(",", twicePitches)}  和弦 {string.Join(",", chordPitches)}");
+
+            return twicePitches.SequenceEqual(new[] { 84, 86, 88, 89 })
+                   && chordPitches.SequenceEqual(new[] { 77, 79, 60, 69, 72, 74 });
+        });
+
+        Check("行前缀：必须行首、必须跟空格、不能混用", () =>
+        {
+            const char lf = (char)10;
+
+            var noSpace = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$1,2,3,4"));
+            var mixed = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$% 1,2,3,4"));
+            var midLine = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "1,$2,3,4"));
+
+            return noSpace.Diagnostics.Any(d => d.Message.Contains("必须跟一个空格"))
+                   && mixed.Diagnostics.Any(d => d.Message.Contains("不能混用"))
+                   && midLine.Diagnostics.Any(d => d.Message.Contains("只能写在行首"));
+        });
+
+        Check("legato：组内音依次起、时值撑到段末", () =>
+        {
+            const char lf = (char)10;
+
+            var whole = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato(1234)"));
+            var split = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato(135+7),legato(13)"));
+
+            if (!whole.CanPlay || !split.CanPlay) return false;
+
+            var wholeNotes = whole.Score!.Notes
+                .Select(n => (n.Pitch, n.StartTicks, n.DurationTicks)).ToArray();
+            var splitNotes = split.Score!.Notes
+                .Select(n => (n.Pitch, n.StartTicks, n.DurationTicks)).ToArray();
+
+            Console.WriteLine($"      legato(1234) -> {string.Join(" ", wholeNotes.Select(n => $"{n.Pitch}@{n.StartTicks}+{n.DurationTicks}"))}");
+            Console.WriteLine($"      分组 -> {string.Join(" ", splitNotes.Select(n => $"{n.Pitch}@{n.StartTicks}+{n.DurationTicks}"))}");
+
+            // 一个小节里每个音都撑到 1920 结束
+            var wholeOk = wholeNotes.SequenceEqual(new[]
+            {
+                (60, 0L, 1920L), (62, 480L, 1440L), (64, 960L, 960L), (65, 1440L, 480L)
+            });
+
+            // 第一组撑到 960（第一段末），第二组撑到 1920
+            var splitOk = splitNotes.SequenceEqual(new[]
+            {
+                (60, 0L, 960L), (64, 240L, 720L), (67, 480L, 480L), (83, 720L, 240L),
+                (60, 960L, 960L), (64, 1440L, 480L)
+            });
+
+            return wholeOk && splitOk;
+        });
+
+        Check("legato：可以和行前缀连用", () =>
+        {
+            const char lf = (char)10;
+
+            var combined = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "$ legato(1357),0,5,1"));
+            var expanded = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato(+1+3+5+7),0,+5,+1"));
+
+            if (!combined.CanPlay || !expanded.CanPlay) return false;
+
+            var a = combined.Score!.Notes.Select(n => (n.Pitch, n.StartTicks, n.DurationTicks)).ToArray();
+            var b = expanded.Score!.Notes.Select(n => (n.Pitch, n.StartTicks, n.DurationTicks)).ToArray();
+
+            Console.WriteLine($"      $ legato -> {string.Join(" ", a.Select(n => $"{n.Pitch}@{n.StartTicks}+{n.DurationTicks}"))}");
+            return a.SequenceEqual(b) && a.Length == 6;
+        });
+
+        Check("高亮：行前缀和 legato 有专门类别", () =>
+        {
+            var result = AttmParser.Parse(J(
+                "bpm = 120", "1 = C 4/4", "",
+                "$ legato(12),3,4,5",
+                "% 1,2,3,4"));
+
+            if (!result.CanPlay) return false;
+
+            var runs = EditorHighlighter.Build(result);
+            var up = runs[3].Select(r => r.Class).Distinct().ToList();
+            var down = runs[4].Select(r => r.Class).Distinct().ToList();
+
+            Console.WriteLine($"      $ 行：{string.Join(",", up)}  % 行：{string.Join(",", down)}");
+
+            return up.Contains(EditorTokenClass.Octave)
+                   && up.Contains(EditorTokenClass.Keyword)
+                   && !up.Contains(EditorTokenClass.Unknown)
+                   && down.Contains(EditorTokenClass.OctaveDown)
+                   && !down.Contains(EditorTokenClass.Unknown);
+        });
+
+        Check("legato：括号缺失 / 为空 / 个数不是 2 的幂都要报错", () =>
+        {
+            const char lf = (char)10;
+
+            var noParen = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato 1234"));
+            var empty = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato()"));
+            var odd = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato(102)"));
+
+            Console.WriteLine($"      3 个音：{odd.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error)?.Message}");
+            return noParen.Diagnostics.Any(d => d.Message.Contains("必须紧跟括号"))
+                   && empty.Diagnostics.Any(d => d.Message.Contains("不能为空"))
+                   && odd.Diagnostics.Any(d => d.Message.Contains("必须是 1、2、4、8"));
+        });
+
+        Check("legato：括号里可以用休止符 0", () =>
+        {
+            const char lf = (char)10;
+
+            var result = AttmParser.Parse(J("bpm = 120", "1 = C 4/4", "", "legato(1020)"));
+            if (!result.CanPlay) return false;
+
+            // 四个拍位：1 在 0、休止在 480、2 在 960；两个音都撑到段末 1920
+            var notes = result.Score!.Notes
+                .Select(n => (n.Pitch, n.StartTicks, n.DurationTicks)).ToArray();
+
+            Console.WriteLine($"      legato(1020) -> {string.Join(" ", notes.Select(n => $"{n.Pitch}@{n.StartTicks}+{n.DurationTicks}"))}");
+
+            return notes.SequenceEqual(new[] { (60, 0L, 1920L), (62, 960L, 960L) });
+        });
+
         Check("音符：+/- 可以叠加表示多个八度", () =>
         {
             const char lf = (char)10;
@@ -703,6 +876,22 @@ internal static class Program
     }
 
     // ------------------------------------------------------------ 工具
+
+    /// <summary>用换行拼一份谱面文本。</summary>
+    private static string J(params string[] lines) => string.Join((char)10, lines);
+
+    /// <summary>向上找仓库根目录（有 ATTM.csproj 的那一层），便于读 samples。</summary>
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "ATTM.csproj"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
 
     private static ParseResult Parse(string header, string body) => AttmParser.Parse(header + body);
 

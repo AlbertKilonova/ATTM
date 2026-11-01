@@ -99,6 +99,8 @@ public static class AttmLexer
                 ')' => TokenKind.RParen,
                 '/' => TokenKind.Slash,
                 '=' => TokenKind.Equals,
+                '$' => TokenKind.LineOctaveUp,
+                '%' => TokenKind.LineOctaveDown,
                 _ => (TokenKind?)null
             };
 
