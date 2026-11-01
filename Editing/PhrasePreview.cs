@@ -25,7 +25,7 @@ public sealed class PhrasePreview : FrameworkElement
     // 入场：滑入 + 淡入（缓出曲线，起步快、收尾稳）
     // 出场：只做渐隐，不位移，也不等待——新旧两段直接叠着交替，换句瞬间就有新内容。
     private const double InDurationMs = 240;
-    private const double OutDurationMs = 90;
+    private const double OutDurationMs = 85;
 
     /// <summary>出场起点透明度上限：旧的立刻压暗，新的读起来更清楚。</summary>
     private const double OutAlphaCap = 0.5;

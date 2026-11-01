@@ -456,6 +456,37 @@ bpm = 120
             return entering > 0.05 && fading && settled >= 0.999;
         });
 
+        Check("乐句预览：小节结束前提前退场", () =>
+        {
+            // bpm 480 -> 一小节 0.5 秒，提前退场 160ms 很容易采样到
+            editor.Text = "bpm = 480" + nl + "1 = C 4/4" + nl + nl
+                + "1,2,3,4" + nl + nl + "5,6,7,+1" + nl + nl + "1,1,1,1";
+            Pump(500);
+
+            var play = (Button)window.FindName("PlayPauseButton")!;
+            var stop = (Button)window.FindName("StopButton")!;
+
+            play.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+            var sawContent = false;
+            var sawEmpty = false;
+            for (var i = 0; i < 70; i++)
+            {
+                Pump(20);
+                if (phrase.HasContent) sawContent = true;
+                else if (sawContent) sawEmpty = true;
+            }
+
+            stop.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump(300);
+
+            editor.Text = phraseScore;
+            Pump(400);
+
+            Console.WriteLine($"      播放中见过内容={sawContent}，见过提前空场={sawEmpty}");
+            return sawContent && sawEmpty;
+        });
+
         Check("乐句预览：沿用编辑器的语法配色", () =>
         {
             editor.ShowPhrase(0);

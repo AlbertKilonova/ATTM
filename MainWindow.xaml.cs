@@ -42,6 +42,12 @@ Vel = 90 +-0
     private readonly ScorePlayer _player;
 
     private ParseResult? _parse;
+
+    /// <summary>乐句提前退场的提前量（秒）。</summary>
+    private const double PhraseFadeLeadSeconds = 0.16;
+
+    /// <summary>已经提前退场的小节号，避免同一小节反复退/又显示。</summary>
+    private int _fadedMeasure = -1;
     private string? _filePath;
     private string _fileName = "未命名.attm";
     private string _deviceName = string.Empty;
@@ -266,7 +272,18 @@ Vel = 90 +-0
         Editor.SetPlaybackSpans(spans);
         _hasHighlight = spans.Count > 0;
 
-        if (Editor.IsPhrasePreviewVisible) Editor.ShowPhrase(GetPlayingMeasure());
+        if (Editor.IsPhrasePreviewVisible)
+        {
+            var measure = GetPlayingMeasure();
+
+            if (ShouldFadeOutPhrase(measure))
+            {
+                Editor.FadeOutPhrase();
+                _fadedMeasure = measure;
+            }
+
+            if (measure != _fadedMeasure) Editor.ShowPhrase(measure);
+        }
 
         if (_config.AutoScrollOnPlay && spans.Count > 0)
             Editor.ScrollOffsetIntoView(spans[0].Start);
@@ -284,6 +301,7 @@ Vel = 90 +-0
         Editor.HidePhrase();
         _hasHighlight = false;
         _lastSecond = -1;
+        _fadedMeasure = -1;
         UpdateStatus();
     }
 
@@ -307,6 +325,19 @@ Vel = 90 +-0
 
         if (visible && WindowState == WindowState.Normal && Width < minWithPanel)
             Width = minWithPanel;
+    }
+
+    /// <summary>小节快结束前一点就让旧乐句开始渐隐，换句时屏幕上已经是干净的。</summary>
+    private bool ShouldFadeOutPhrase(int measureIndex)
+    {
+        if (_player.Score is not { } score) return false;
+        if (measureIndex == _fadedMeasure) return false;
+        if (Editor.PhraseMeasureIndex != measureIndex) return false;
+
+        var measureSeconds = score.MeasureTicks * score.SecondsPerTick;
+        var remaining = (measureIndex + 1) * measureSeconds - _player.Position.TotalSeconds;
+
+        return remaining > 0 && remaining <= PhraseFadeLeadSeconds;
     }
 
     private void PhraseButton_Click(object sender, RoutedEventArgs e)
@@ -646,10 +677,12 @@ Vel = 90 +-0
                 _player.Pause();
                 return;
             case PlayerState.Paused:
+                _fadedMeasure = -1;
                 _player.Play();
                 return;
             default:
                 _player.SetScore(parsed.Score);
+                _fadedMeasure = -1;
                 _player.Play();
                 return;
         }
@@ -660,6 +693,7 @@ Vel = 90 +-0
         if (_parse is not { CanPlay: true } parsed) return;
 
         _player.SetScore(parsed.Score);
+        _fadedMeasure = -1;
         _player.Play(GetCaretPlaybackPosition());
     }
 

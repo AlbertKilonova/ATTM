@@ -281,6 +281,12 @@ public sealed class AttmEditor : Grid
 
     public void HidePhrase() => _phrase.Hide();
 
+    /// <summary>当前乐句对应的小节号（-1 = 没有内容）。</summary>
+    public int PhraseMeasureIndex => _phrase.MeasureIndex;
+
+    /// <summary>让当前乐句马上开始渐隐（在小节结束前一点提前退场）。</summary>
+    public void FadeOutPhrase() => _phrase.Hide();
+
     private IReadOnlyList<PhraseLine> BuildPhraseLines(int measureIndex)
     {
         var starts = _parse?.MeasureStartLines;
