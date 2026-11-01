@@ -423,15 +423,39 @@ bpm = 120
 
         Check("乐句预览：换句时文字从行外滑入", () =>
         {
+            editor.ShowPhrase(0);
+            Pump(700);
             editor.ShowPhrase(1);
-            Pump(120);
+            Pump(320);
+
             var midway = phrase.RevealProgress;
 
             Pump(700);
             var settled = phrase.RevealProgress;
 
-            Console.WriteLine($"      120ms 进度 {midway:F2}，700ms 后 {settled:F2}");
+            Console.WriteLine($"      320ms 进度 {midway:F2}，之后 {settled:F2}");
             return midway is > 0.02 and < 0.98 && settled >= 0.999;
+        });
+
+        Check("乐句预览：旧句先退场、新句后入场（不重叠）", () =>
+        {
+            editor.ShowPhrase(0);
+            Pump(700);
+
+            editor.ShowPhrase(1);
+            Pump(100);
+
+            var gap = phrase.RevealProgress;      // 新句还没开始画
+            var leaving = phrase.IsAnimating;     // 旧句还在退场
+
+            Pump(230);
+            var entering = phrase.RevealProgress; // 新句已经开始入场
+
+            Pump(700);
+            var settled = phrase.RevealProgress;
+
+            Console.WriteLine($"      100ms 新句进度 {gap:F2}（旧句退场中={leaving}），330ms 进度 {entering:F2}，最终 {settled:F2}");
+            return gap <= 0.001 && leaving && entering > 0.05 && settled >= 0.999;
         });
 
         Check("乐句预览：沿用编辑器的语法配色", () =>

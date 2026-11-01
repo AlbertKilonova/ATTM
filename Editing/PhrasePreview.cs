@@ -20,8 +20,16 @@ public sealed class PhrasePreview : FrameworkElement
     private const double MaxFontSize = 64;
     private const double MinFontSize = 14;
     private const double InDurationMs = 340;
-    private const double OutDurationMs = 200;
+    private const double OutDurationMs = 150;
+
+    /// <summary>旧句淡出后到新句入场之间的空隙，避免两段文字在屏幕上重叠。</summary>
+    private const double InDelayMs = 190;
+
+    /// <summary>快节奏换句时的空隙（上一句还没入场完就换句）。</summary>
+    private const double RushDelayMs = 60;
+
     private const double LineStaggerMs = 80;
+    private const double OutStaggerMs = 40;
     private const double SlideDistance = 64;
 
     private readonly List<PhraseLine> _current = new();
@@ -65,7 +73,15 @@ public sealed class PhrasePreview : FrameworkElement
 
     public bool HasContent => _current.Count > 0;
 
-    public bool IsAnimating => _outgoing is not null || RevealProgress < 1;
+    public bool IsAnimating
+    {
+        get
+        {
+            if (_outgoing is not null) return true;
+            if (_current.Count == 0) return false;
+            return Now() < _inStartedAt || RevealProgress < 1;
+        }
+    }
 
     /// <summary>最后一行的揭示进度（0 = 还没出现，1 = 完全就位），供测试采样动画。</summary>
     public double RevealProgress
@@ -92,6 +108,9 @@ public sealed class PhrasePreview : FrameworkElement
     {
         if (measureIndex == MeasureIndex && SameLines(lines)) return;
 
+        // 上一句还没入场完就又换句（快节奏时）：缩短退场与空隙，别让屏幕一直空着
+        var rush = _current.Count > 0 && RevealProgress < 1;
+
         if (_current.Count > 0)
             _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), AlphaOfCurrent(), Now());
 
@@ -100,7 +119,9 @@ public sealed class PhrasePreview : FrameworkElement
         _active.Clear();
         MeasureIndex = measureIndex;
         MeasureCount = measureCount;
-        _inStartedAt = Now();
+
+        // 先让旧句退场，过一小段空隙再入场（新句在这段时间里进度为 0，不会画出来）
+        _inStartedAt = (long)(Now() + (rush ? RushDelayMs : InDelayMs));
 
         StartTimer();
         InvalidateVisual();
@@ -110,6 +131,9 @@ public sealed class PhrasePreview : FrameworkElement
     public void Hide()
     {
         if (_current.Count == 0 && _outgoing is null) return;
+
+        // 上一句还没入场完就又换句（快节奏时）：缩短退场与空隙，别让屏幕一直空着
+        var rush = _current.Count > 0 && RevealProgress < 1;
 
         if (_current.Count > 0)
             _outgoing = new OutgoingPhrase(new List<PhraseLine>(_current), AlphaOfCurrent(), Now());
@@ -233,9 +257,11 @@ public sealed class PhrasePreview : FrameworkElement
         if (_outgoing is not null)
         {
             var elapsed = Now() - _outgoing.StartedAt;
-            var progress = Math.Clamp(elapsed / OutDurationMs, 0.0, 1.0);
-            if (progress >= 1) _outgoing = null;
-            else DrawPhrase(dc, _outgoing.Lines, body, 1.0 - progress, _outgoing.StartAlpha * (1 - progress), true);
+            var visible = 1 - Math.Clamp((elapsed - (_outgoing.Lines.Count - 1) * OutStaggerMs) / OutDurationMs, 0.0, 1.0);
+            var batchAlpha = _outgoing.StartAlpha * (1 - Math.Clamp(elapsed / OutDurationMs, 0.0, 1.0));
+
+            if (visible <= 0.001 || batchAlpha <= 0.001) _outgoing = null;
+            else DrawPhrase(dc, _outgoing.Lines, body, _outgoing.StartedAt, batchAlpha, true);
         }
 
         if (_current.Count == 0)
@@ -244,7 +270,7 @@ public sealed class PhrasePreview : FrameworkElement
             return;
         }
 
-        DrawPhrase(dc, _current, body, 1.0, 1.0, false);
+        DrawPhrase(dc, _current, body, _inStartedAt, 1.0, false);
     }
 
     private void DrawHeader(DrawingContext dc, double width)
@@ -292,14 +318,14 @@ public sealed class PhrasePreview : FrameworkElement
         dc.DrawText(hint, new Point(0, body.Top + (body.Height - hint.Height) / 2));
     }
 
-    /// <param name="elapsedFactor">0 = 动画起点，1 = 完全就位。</param>
+    /// <param name="startedAt">这一组动画的起始时间（入场 = _inStartedAt，出场 = outgoing 起点）。</param>
     /// <param name="batchAlpha">整组透明度。</param>
     /// <param name="leaving">true = 正在淡出（滑动方向相反）。</param>
     private void DrawPhrase(
         DrawingContext dc,
         IReadOnlyList<PhraseLine> lines,
         Rect body,
-        double elapsedFactor,
+        long startedAt,
         double batchAlpha,
         bool leaving)
     {
@@ -311,10 +337,14 @@ public sealed class PhrasePreview : FrameworkElement
         var totalHeight = lineHeight * lines.Count;
         var top = body.Top + Math.Max(12, (body.Height - totalHeight) / 2);
 
+        var now = Now();
         for (var i = 0; i < lines.Count; i++)
         {
-            // 逐行错峰：每行比上一行晚 80ms 出发
-            var progress = leaving ? elapsedFactor : ProgressOf(i, Now() - _inStartedAt);
+            // 入场逐行晚 80ms 出发；出场逐行早 40ms 走，形成"从上往下依次退场"的次序感
+            var progress = leaving
+                ? 1 - Ease(Math.Clamp((now - startedAt - i * OutStaggerMs) / OutDurationMs, 0.0, 1.0))
+                : ProgressOf(i, now - startedAt);
+
             if (progress <= 0.001) continue;
 
             // 偶数行从左边滑进来，奇数行从右边滑进来；出场沿原路滑回去
