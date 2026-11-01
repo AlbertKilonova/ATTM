@@ -87,7 +87,7 @@ public partial class MainWindow : IPluginDocumentBridge
             catch (Exception ex)
             {
                 _plugins.Log($"命令 {command.Id} 执行失败：{ex.Message}");
-                ShowPluginMessage($"{entry.DisplayName}：{ex.Message}", isError: true);
+                ShowStatusMessage($"{entry.DisplayName}：{ex.Message}", isError: true);
             }
         };
 
@@ -127,15 +127,15 @@ public partial class MainWindow : IPluginDocumentBridge
 
     // ------------------------------------------------------------ 插件管理器
 
-    private void ShowPluginManager()
+    private void ShowPluginManager() => SafeRun("打开插件管理器", () =>
     {
         var dialog = new PluginManagerWindow(_plugins, _config, ReloadPlugins) { Owner = this };
         dialog.ShowDialog();
 
         if (!dialog.ToggledAny) return;
 
-        ShowPluginMessage("插件开关已保存，重启 ATTM 后生效");
-    }
+        ShowStatusMessage("插件开关已保存，重启 ATTM 后生效");
+    });
 
     /// <summary>热重载：拆掉插件控件 → 卸载上下文 → 重新扫描 → 重新装配。</summary>
     private void ReloadPlugins()
@@ -150,7 +150,7 @@ public partial class MainWindow : IPluginDocumentBridge
         ApplyPluginContributions();
         UpdateButtons();
 
-        ShowPluginMessage(
+        ShowStatusMessage(
             clean ? "插件已重新加载" : "插件已重新加载（部分上下文未能卸载，建议重启）",
             isError: !clean);
     }
@@ -181,6 +181,9 @@ public partial class MainWindow : IPluginDocumentBridge
             if (answer != MessageBoxResult.Yes) continue;
 
             _config.ApprovedPlugins.Add(entry.Plugin.Id + "@" + entry.Plugin.Version);
+
+            // 关键：宿主的授权集合是构造时快照的，必须同步更新，否则 Reload 后仍是 PendingApproval
+            _plugins.Approve(entry.Plugin.Id, entry.Plugin.Version);
             approved++;
         }
 
@@ -188,6 +191,26 @@ public partial class MainWindow : IPluginDocumentBridge
 
         _config.Save();
         ReloadPlugins();
+    }
+
+    /// <summary>
+    /// 统一包一层：任何界面操作失败都变成「可读的错误提示 + 日志」，
+    /// 而不是按钮点了没反应。
+    /// </summary>
+    private void SafeRun(string action, Action body)
+    {
+        try
+        {
+            body();
+        }
+        catch (Exception ex)
+        {
+            var path = App.WriteLog(ex);
+            _plugins.Log($"{action} 失败：{ex}");
+
+            MessageBox.Show(this, $"{action}失败：{ex.Message}\n\n详细信息已写入：\n{path}", "ATTM",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     // ------------------------------------------------------------ 文档桥
@@ -211,7 +234,7 @@ public partial class MainWindow : IPluginDocumentBridge
         Reparse();
     }
 
-    void IPluginDocumentBridge.SetStatus(string message) => ShowPluginMessage(message);
+    void IPluginDocumentBridge.SetStatus(string message) => ShowStatusMessage(message);
 
     void IPluginDocumentBridge.ShowMessage(string message, bool isError)
         => MessageBox.Show(this, message, "插件",
@@ -221,7 +244,7 @@ public partial class MainWindow : IPluginDocumentBridge
     // ------------------------------------------------------------ 状态栏消息
 
     /// <summary>状态栏上的一条短期消息，几秒后自动消失。</summary>
-    private void ShowPluginMessage(string message, bool isError = false)
+    private void ShowStatusMessage(string message, bool isError = false)
     {
         PluginMessageText.Text = message;
         PluginMessageText.Foreground = (System.Windows.Media.Brush)FindResource(isError ? "Brush.Error" : "Brush.TextSecondary");

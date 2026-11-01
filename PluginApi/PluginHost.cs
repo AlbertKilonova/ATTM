@@ -222,6 +222,9 @@ public sealed class PluginHost : IDisposable
     private IReadOnlyList<PluginEntry> WithCapability<T>() where T : class
         => _entries.Where(static e => e.IsLoaded && e.Plugin is T).ToList();
 
+    /// <summary>运行时追加一条授权（用户刚点了「是」）；随后调用 <see cref="Reload"/> 即可生效。</summary>
+    public void Approve(string pluginId, string version) => _approvals.Add(pluginId + "@" + version);
+
     private bool IsApproved(string id, string version) => _approvals.Contains(id + "@" + version);
 
     private string DataDirectoryFor(string pluginId)

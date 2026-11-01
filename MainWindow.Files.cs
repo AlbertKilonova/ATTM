@@ -31,13 +31,20 @@ public partial class MainWindow
         var extension = Path.GetExtension(path);
         if (string.IsNullOrEmpty(extension)) return null;
 
+        var candidates = new List<PluginEntry>();
+
         foreach (var entry in _plugins.Importers)
         {
             if (entry.Plugin is not IImporterPlugin importer) continue;
-            if (importer.Extensions.Any(e => e.Equals(extension, StringComparison.OrdinalIgnoreCase))) return importer;
+            if (importer.Extensions.Any(e => e.Equals(extension, StringComparison.OrdinalIgnoreCase))) candidates.Add(entry);
         }
 
-        return null;
+        if (candidates.Count == 0) return null;
+
+        // 多个插件认领同一扩展名时：拖放/命令行/粘贴走「沙箱插件」这个安全默认值，
+        // 想用需要联网或模型的插件，请走导入对话框（按过滤器选择）。
+        var preferred = candidates.FirstOrDefault(e => e.Trust == PluginTrust.Sandboxed) ?? candidates[0];
+        return (IImporterPlugin)preferred.Plugin!;
     }
 
     /// <summary>能直接打开的文件：谱面文本，或任一导入插件认得的格式。</summary>
@@ -112,6 +119,9 @@ public partial class MainWindow
 
         Reparse();
         Editor.FocusEditor();
+
+        // 内容与模板相同的时候界面看不出变化，给一条明确反馈
+        ShowStatusMessage("已新建文档");
     }
 
     /// <summary>打开谱库文件夹（音乐\ATTM），在里面双击 .attm 就会用本程序打开。</summary>
@@ -265,14 +275,14 @@ public partial class MainWindow
 
         if (control && e.Key == Key.O)
         {
-            OpenLibraryFolder();
+            SafeRun("打开谱库", OpenLibraryFolder);
             e.Handled = true;
             return;
         }
 
         if (control && e.Key == Key.N)
         {
-            NewDocument();
+            SafeRun("新建", NewDocument);
             e.Handled = true;
             return;
         }

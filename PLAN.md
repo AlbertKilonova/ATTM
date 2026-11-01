@@ -835,3 +835,23 @@ Brush.Gutter / Brush.GutterText / Brush.CurrentLine
 - 界面：插件管理器新增「信任」列（沙箱 / 无沙箱）、「待授权」状态、**重新加载插件**按钮；主窗口 `ReloadPlugins()` 重建槽位控件并按回收结果给出提示。
 - 测试：112 全绿（新增扫描器命中、内置插件合规、授权闸门、授权后放行、Reload 重装 5 项）。
 - 文档：`docs/12-插件系统.md` 增加 §15 沙箱（三层模型、禁止表、`ReadFileBytes`、授权流程、边界）与 §16 热重载（流程、独立栈帧的坑、回收结果汇报、何时仍需重启）。
+
+### 2026-11-01 第二个插件：MIDI AI 整理
+
+- 新工程 `plugins/ATTM.Plugin.MidiAi/`：自带精简 SMF 读取（`MiniSmf`，format 0/1 + running status），不依赖另一个插件。
+- 流程：读 MIDI → 生成「音符摘要」→ 拼提示词（内置 ATTM 语法要点）→ HTTP 调本机小模型（Ollama `/api/chat` 或 OpenAI `/v1/chat/completions`，按 URL 自动切换）→ 去代码块、补指令 → `AttmParser` 校验；不合法就把诊断码回喂给模型重试一次，仍失败则报错。
+- 信任：实现 `ITrustRequestPlugin`（需要访问 127.0.0.1），首次启动弹窗确认，结论按 `id@version` 记录 —— 未授权时状态为 `PendingApproval`，连 `Initialize` 都不调。
+- 设置：实现 `IUiPlugin`，设置窗口里有接口地址 / 模型名 / 超时；配置写插件数据目录，写不了退回程序目录。
+- 宿主改进：导入对话框按「过滤器序号」选择插件，所以基础导入与 AI 整理可以同时认领 `.mid`，由用户在选择框里挑。
+- 实测：假模型服务（Node，返回固定谱面）→ 插件导入 `samples/小星星 - 演示谱.mid` → 输出 60 字符、可播放、2 小节；未授权时正确落在 `PendingApproval`。
+- 文档：`docs/12-插件系统.md` 新增 §9.2（流程图、信任、设置、自愈、启动模型的命令）。
+
+### 2026-11-01 把模型搬进插件（进程内推理）
+
+- `ATTM.Plugin.MidiAi` 引入 `LLamaSharp 0.23.0` + `LLamaSharp.Backend.Cpu`：GGUF 直接在插件进程内加载，Ollama 服务变成备用通道。
+- `LocalModel`：`NativeLibraryConfig.WithSearchDirectories` 覆盖插件目录与 `runtimes/win-x64/native/*`；模型只加载一次并复用（`ModelParams` ContextSize 4096、`GpuLayerCount=0`）。
+- 打包：构建目标把插件本体 + 托管依赖 + `runtimes/win-x64/**` 复制进 `bin/<cfg>/net10.0-windows/plugins/`（约 11 MB），原生库不会污染其它目录。
+- 输出治理加强：提示词加 few-shot 示例、限制前 8 小节；返回内容丢弃解释性文字、补全缺失指令；「只有指令没有谱面」也会判定失败并重试一次。
+- 设置项改为：模型文件（.gguf）+ 服务地址 + 服务模型名 + 超时 + 最大 token，并有「浏览…」选模型。
+- 实测（本机 CPU，gemma-3-4b Q4_K_M 2.5 GB）：加载约 25 s、生成约 4 tok/s；8 小节 256 token 约 30 s，产出可被 `AttmParser` 接受的谱面。
+- 文档：`docs/12-插件系统.md` §9.2 重写（进程内管线、实测数据、选型建议、用 Ollama blob 当 GGUF 的技巧）。

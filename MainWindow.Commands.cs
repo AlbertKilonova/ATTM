@@ -80,9 +80,14 @@ public partial class MainWindow
             return;
         }
 
-        var filters = importers
+        // 每个导入插件占一个过滤器项；顺序与 importers 一一对应，
+        // 这样「MIDI 基础导入」和「MIDI AI 整理」可以同时存在，由用户在对话框里选。
+        var usable = importers
+            .Where(entry => !string.IsNullOrWhiteSpace(((IImporterPlugin)entry.Plugin!).FileFilter))
+            .ToList();
+
+        var filters = usable
             .Select(entry => ((IImporterPlugin)entry.Plugin!).FileFilter)
-            .Where(filter => !string.IsNullOrWhiteSpace(filter))
             .ToList();
 
         filters.Add("所有文件 (*.*)|*.*");
@@ -106,7 +111,11 @@ public partial class MainWindow
 
         if (dialog.ShowDialog(this) != true) return;
 
-        var importer = FindImporter(dialog.FileName);
+        // FilterIndex 从 1 开始，减一正好对上 usable 的下标
+        var index = dialog.FilterIndex - 1;
+        var importer = index >= 0 && index < usable.Count
+            ? (IImporterPlugin)usable[index].Plugin!
+            : FindImporter(dialog.FileName);
 
         if (importer is null)
         {
@@ -123,9 +132,9 @@ public partial class MainWindow
         ImportWith(importer, dialog.FileName);
     }
 
-    private void NewButton_Click(object sender, RoutedEventArgs e) => NewDocument();
+    private void NewButton_Click(object sender, RoutedEventArgs e) => SafeRun("新建", NewDocument);
 
-    private void OpenButton_Click(object sender, RoutedEventArgs e) => OpenLibraryFolder();
+    private void OpenButton_Click(object sender, RoutedEventArgs e) => SafeRun("打开谱库", OpenLibraryFolder);
 
     // 工具栏的保存键始终要求重新选位置；Ctrl+S 才在保存过一次后直接覆盖保存
     private void SaveButton_Click(object sender, RoutedEventArgs e) => SaveDocument(forceDialog: true);

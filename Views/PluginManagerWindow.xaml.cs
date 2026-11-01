@@ -16,6 +16,7 @@ public partial class PluginManagerWindow : Window
 {
     private readonly PluginHost _host;
     private readonly AppConfig _config;
+    private readonly List<(PluginEntry Entry, CheckBox Toggle, TextBlock State)> _rows = new();
 
     private readonly Action? _onReload;
 
@@ -38,6 +39,7 @@ public partial class PluginManagerWindow : Window
     private void BuildList()
     {
         PluginList.Items.Clear();
+        _rows.Clear();
 
         var loaded = _host.Entries.Count(e => e.IsLoaded);
         var failed = _host.Entries.Count(e => e.State == PluginState.Failed);
@@ -45,7 +47,8 @@ public partial class PluginManagerWindow : Window
         var pending = _host.Entries.Count(e => e.State == PluginState.PendingApproval);
 
         SummaryText.Text =
-            $"共 {_host.Entries.Count} 个：已启用 {loaded} · 已禁用 {disabled} · 待授权 {pending} · 失败 {failed}";
+            $"共 {_host.Entries.Count} 个：已启用 {loaded} · 已禁用 {disabled} · 待授权 {pending} · 失败 {failed}"
+            + $"\n配置文件：{AppConfig.ActiveConfigPath}";
 
         if (_host.Entries.Count == 0)
         {
@@ -68,20 +71,31 @@ public partial class PluginManagerWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+        var disabledInConfig = _config.DisabledPlugins.Any(name =>
+            string.Equals(name, entry.Source, StringComparison.OrdinalIgnoreCase));
+
         var toggle = new CheckBox
         {
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 12, 0),
-            IsChecked = entry.State != PluginState.Disabled,
+            IsChecked = !disabledInConfig,
             ToolTip = "取消勾选后重启即不再装载",
             IsEnabled = entry.SourcePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
                         && entry.State != PluginState.PendingApproval
         };
 
+        var stateText = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0)
+        };
+
+        // 关键：切换后就地刷新这一行，**不要重建整个列表**
+        // ——重建会把正在处理 Click 的 CheckBox 从树上摘掉，看起来就像「点了没反应」。
         toggle.Click += (_, _) =>
         {
             SetEnabled(entry, toggle.IsChecked == true);
-            BuildList();
+            ApplyRowState(stateText, entry, toggle.IsChecked == true);
         };
 
         grid.Children.Add(toggle);
@@ -122,28 +136,11 @@ public partial class PluginManagerWindow : Window
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
 
-        var state = new TextBlock
-        {
-            Text = entry.State switch
-            {
-                PluginState.Loaded => "已启用",
-                PluginState.Disabled => "已禁用",
-                PluginState.PendingApproval => "待授权",
-                _ => "失败"
-            },
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(10, 0, 0, 0),
-            Foreground = (Brush)FindResource(entry.State switch
-            {
-                PluginState.Loaded => "Brush.Success",
-                PluginState.Disabled => "Brush.TextDisabled",
-                PluginState.PendingApproval => "Brush.Accent",
-                _ => "Brush.Error"
-            })
-        };
+        ApplyRowState(stateText, entry, toggle.IsChecked == true);
 
-        Grid.SetColumn(state, 2);
-        grid.Children.Add(state);
+        Grid.SetColumn(stateText, 2);
+        grid.Children.Add(stateText);
+        _rows.Add((entry, toggle, stateText));
 
         return new Border
         {
@@ -151,6 +148,27 @@ public partial class PluginManagerWindow : Window
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = grid
         };
+    }
+
+    /// <summary>按「配置里的启用状态」刷新一行，未重启前也能看到改动结果。</summary>
+    private void ApplyRowState(TextBlock stateText, PluginEntry entry, bool enabled)
+    {
+        if (entry.State == PluginState.PendingApproval)
+        {
+            stateText.Text = "待授权";
+            stateText.Foreground = (Brush)FindResource("Brush.Accent");
+            return;
+        }
+
+        if (entry.State == PluginState.Failed && enabled)
+        {
+            stateText.Text = "失败";
+            stateText.Foreground = (Brush)FindResource("Brush.Error");
+            return;
+        }
+
+        stateText.Text = enabled ? "已启用" : "已禁用（重启生效）";
+        stateText.Foreground = (Brush)FindResource(enabled ? "Brush.Success" : "Brush.Accent");
     }
 
     private static string DescribeCapabilities(PluginEntry entry)
@@ -181,7 +199,16 @@ public partial class PluginManagerWindow : Window
             list.Add(entry.Source);
         }
 
-        _config.Save();
+        if (!_config.Save())
+        {
+            MessageBox.Show(this,
+                "设置没能保存，重启后这项改动会丢失：\n\n" + (AppConfig.LastSaveError ?? "未知原因"),
+                "ATTM",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         ToggledAny = true;
     }
 
