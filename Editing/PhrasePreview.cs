@@ -23,18 +23,19 @@ public sealed class PhrasePreview : FrameworkElement
     private const double MinFontSize = 14;
 
     // 入场：缓出（起步快、收尾稳）；出场：缓入（起步慢、后段加速离开）
-    private const double InDurationMs = 320;
-    private const double OutDurationMs = 170;
+    // 时长都压得比较短，让大字紧跟小节边界：换句后约 0.1 秒旧句退完、新句开始入画。
+    private const double InDurationMs = 280;
+    private const double OutDurationMs = 110;
 
     /// <summary>旧句退完到新句入场之间的空隙，避免两段文字在屏幕上重叠。</summary>
-    private const double InDelayMs = 190;
+    private const double InDelayMs = 125;
 
     /// <summary>快节奏换句时的空隙（上一句还没入场完就换句）。</summary>
-    private const double RushDelayMs = 60;
+    private const double RushDelayMs = 45;
 
-    private const double LineStaggerMs = 80;
-    private const double OutStaggerMs = 32;
-    private const double SlideDistance = 64;
+    private const double LineStaggerMs = 60;
+    private const double OutStaggerMs = 15;
+    private const double SlideDistance = 40;   // 位移短一点，文字更快进入可读位置
 
     private readonly List<PhraseLine> _current = new();
     private readonly List<ActiveRange> _active = new();

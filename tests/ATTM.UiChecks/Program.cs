@@ -426,14 +426,14 @@ bpm = 120
             editor.ShowPhrase(0);
             Pump(700);
             editor.ShowPhrase(1);
-            Pump(320);
+            Pump(280);
 
             var midway = phrase.RevealProgress;
 
             Pump(700);
             var settled = phrase.RevealProgress;
 
-            Console.WriteLine($"      320ms 进度 {midway:F2}，之后 {settled:F2}");
+            Console.WriteLine($"      280ms 进度 {midway:F2}，之后 {settled:F2}");
             return midway is > 0.02 and < 0.98 && settled >= 0.999;
         });
 
